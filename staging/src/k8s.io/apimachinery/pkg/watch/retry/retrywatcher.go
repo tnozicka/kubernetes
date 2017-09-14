@@ -14,17 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package watch
+package retry
 
 import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // Watch function is responsible for creating a watcher starting at sinceResourceVersion.
-type WatchFunc func(sinceResourceVersion string) Interface
+type WatchFunc func(sinceResourceVersion string) watch.Interface
 
 // Type of an event that will be returned if RetryWatcher fails
 type RetryWatcherError string
@@ -50,17 +51,19 @@ type resourceVersionInterface interface {
 type RetryWatcher struct {
 	lastResourceVersion string
 	watchFunc           WatchFunc
-	resultChan          chan Event
+	resultChan          chan watch.Event
 	stopChan            chan struct{}
 }
 
 // Creates a new RetryWatcher.
+// It will make sure that watcher gets restarted in case of recoverable errors.
+// The initialResourceVersion will be given to watchFunc when first called.
 func NewRetryWatcher(initialResourceVersion string, watchFunc WatchFunc) *RetryWatcher {
 	rw := &RetryWatcher{
 		lastResourceVersion: initialResourceVersion,
 		watchFunc:           watchFunc,
 		stopChan:            make(chan struct{}),
-		resultChan:          make(chan Event, 1),
+		resultChan:          make(chan watch.Event, 1),
 	}
 	go rw.receive()
 	return rw
@@ -72,6 +75,9 @@ func (rw *RetryWatcher) receive() {
 		// We need to wrap this code in a function so the old watchers are freed by defer between retries
 		done := func() bool {
 			watcher := rw.watchFunc(rw.lastResourceVersion)
+			if watcher == nil {
+				return false
+			}
 			ch := watcher.ResultChan()
 			defer watcher.Stop()
 
@@ -83,11 +89,11 @@ func (rw *RetryWatcher) receive() {
 
 				// We need to inspect the event and get ResourceVersion out of it
 				switch t := event.Type; t {
-				case Added, Modified, Deleted:
+				case watch.Added, watch.Modified, watch.Deleted:
 					metaObject, ok := event.Object.(resourceVersionInterface)
 					if !ok {
-						rw.resultChan <- Event{
-							Type:   Error,
+						rw.resultChan <- watch.Event{
+							Type:   watch.Error,
 							Object: RetryWatcherError("__internal__: RetryWatcher: doen't support resourceversion"),
 						}
 						// We have to abort here because this might cause lastResourceVersion inconsistency!
@@ -96,8 +102,8 @@ func (rw *RetryWatcher) receive() {
 
 					resourceVersion := metaObject.GetResourceVersion()
 					if resourceVersion == "" {
-						rw.resultChan <- Event{
-							Type:   Error,
+						rw.resultChan <- watch.Event{
+							Type:   watch.Error,
 							Object: RetryWatcherError(fmt.Sprintf("__internal__: RetryWatcher: object %#v doesn't support resourceVersion", event.Object)),
 						}
 						// We have to abort here because this might cause lastResourceVersion inconsistency!
@@ -110,14 +116,14 @@ func (rw *RetryWatcher) receive() {
 
 					return false
 
-				case Error:
+				case watch.Error:
 					rw.resultChan <- event
 					// TODO: check if there is a reasonable error to retry here
 					return true
 
 				default:
-					rw.resultChan <- Event{
-						Type:   Error,
+					rw.resultChan <- watch.Event{
+						Type:   watch.Error,
 						Object: RetryWatcherError(fmt.Sprintf("__internal__: RetryWatcher failed to recognize Event type %q", t)),
 					}
 					// We have to abort here because this might cause lastResourceVersion inconsistency!
@@ -135,17 +141,11 @@ func (rw *RetryWatcher) receive() {
 }
 
 // ResultChan implements Interface.
-func (rw *RetryWatcher) ResultChan() <-chan Event {
+func (rw *RetryWatcher) ResultChan() <-chan watch.Event {
 	return rw.resultChan
 }
 
 // Stop implements Interface.
 func (rw *RetryWatcher) Stop() {
 	close(rw.stopChan)
-}
-
-// WithRetry will wrap the watchFunc with RetryWatcher making sure that watcher gets restarted in case of errors.
-// The initialResourceVersion will be given to watchFunc when first called.
-func WithRetry(initialResourceVersion string, watchFunc WatchFunc) Interface {
-	return NewRetryWatcher(initialResourceVersion, watchFunc)
 }

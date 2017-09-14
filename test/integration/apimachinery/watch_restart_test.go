@@ -24,11 +24,17 @@ import (
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	winformer "k8s.io/apimachinery/pkg/watch/informer"
+	wretry "k8s.io/apimachinery/pkg/watch/retry"
+	wuntil "k8s.io/apimachinery/pkg/watch/until"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/test/integration/framework"
 )
@@ -39,7 +45,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 
 	// Set up a master
 	masterConfig := framework.NewIntegrationTestMasterConfig()
-	masterConfig.EnableCoreControllers = false
+	masterConfig.ExtraConfig.EnableCoreControllers = false
 	// Timeout is set random between MinRequestTimeout and 2x
 	masterConfig.GenericConfig.MinRequestTimeout = int(timeout.Seconds()) / 4
 	_, s, closeFn := framework.RunAMaster(masterConfig)
@@ -54,13 +60,25 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 	namespaceObject := framework.CreateTestingNamespace("retry-watch", s, t)
 	defer framework.DeleteTestingNamespace(namespaceObject, s, t)
 
-	getWatchFunc := func(c *kubernetes.Clientset, secret *v1.Secret) func(rv string) watch.Interface {
-		return func(rv string) watch.Interface {
-			watcher, err := c.CoreV1().Secrets(secret.Namespace).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: secret.Name, ResourceVersion: rv}))
+	getListFunc := func(c *kubernetes.Clientset, secret *v1.Secret) func(options metav1.ListOptions) *v1.SecretList {
+		return func(options metav1.ListOptions) *v1.SecretList {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", secret.Name).String()
+			res, err := c.CoreV1().Secrets(secret.Namespace).List(options)
+			if err != nil {
+				t.Fatalf("Failed to create lister on Secret: %v", err)
+			}
+			return res
+		}
+	}
+
+	getWatchFunc := func(c *kubernetes.Clientset, secret *v1.Secret) func(options metav1.ListOptions) watch.Interface {
+		return func(options metav1.ListOptions) watch.Interface {
+			options.FieldSelector = fields.OneTermEqualSelector("metadata.name", secret.Name).String()
+			res, err := c.CoreV1().Secrets(secret.Namespace).Watch(options)
 			if err != nil {
 				t.Fatalf("Failed to create watcher on Secret: %v", err)
 			}
-			return watcher
+			return res
 		}
 	}
 
@@ -117,17 +135,41 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 			succeed: false,
 			secret:  newTestSecret("secret-01"),
 			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
-				return getWatchFunc(c, secret)(secret.ResourceVersion)
+				options := metav1.ListOptions{
+					ResourceVersion: secret.ResourceVersion,
+				}
+				return getWatchFunc(c, secret)(options)
 			}, // regular watcher; unfortunately destined to fail
 		},
 		{
 			succeed: true,
 			secret:  newTestSecret("secret-02"),
 			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
-				return watch.WithRetry(secret.ResourceVersion, getWatchFunc(c, secret))
+				return wretry.NewRetryWatcher(secret.ResourceVersion, func(rv string) watch.Interface {
+					options := metav1.ListOptions{
+						ResourceVersion: rv,
+					}
+					return getWatchFunc(c, secret)(options)
+				})
+			},
+		},
+		{
+			succeed: true,
+			secret:  newTestSecret("secret-03"),
+			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
+				lw := &cache.ListWatch{
+					ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+						return getListFunc(c, secret)(options), nil
+					},
+					WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+						return getWatchFunc(c, secret)(options), nil
+					},
+				}
+				return winformer.NewInformerWatcher(lw, &v1.Secret{}, 60*time.Second)
 			},
 		},
 	}
+
 	for _, tmptc := range tt {
 		tc := tmptc // we need to copy it for parallel runs
 		t.Run("", func(t *testing.T) {
@@ -153,7 +195,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 
 			// Record current time to be able to asses if the timeout has been reached
 			startTime := time.Now()
-			_, err = watch.Until(timeout, watcher, func(event watch.Event) (bool, error) {
+			_, err = wuntil.Until(timeout, watcher, func(event watch.Event) (bool, error) {
 				s, ok := event.Object.(*v1.Secret)
 				if !ok {
 					t.Fatalf("Recived an object that is not a Secret: %#v", event.Object)

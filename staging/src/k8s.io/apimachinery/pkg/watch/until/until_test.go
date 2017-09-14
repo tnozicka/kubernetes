@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package watch
+package until
 
 import (
 	"errors"
@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 type fakePod struct {
@@ -35,15 +36,15 @@ func (obj *fakePod) GetObjectKind() schema.ObjectKind { return schema.EmptyObjec
 func (obj *fakePod) DeepCopyObject() runtime.Object   { panic("DeepCopyObject not supported by fakePod") }
 
 func TestUntil(t *testing.T) {
-	fw := NewFake()
+	fw := watch.NewFake()
 	go func() {
 		var obj *fakePod
 		fw.Add(obj)
 		fw.Modify(obj)
 	}()
 	conditions := []ConditionFunc{
-		func(event Event) (bool, error) { return event.Type == Added, nil },
-		func(event Event) (bool, error) { return event.Type == Modified, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Modified, nil },
 	}
 
 	timeout := time.Minute
@@ -54,7 +55,7 @@ func TestUntil(t *testing.T) {
 	if lastEvent == nil {
 		t.Fatal("expected an event")
 	}
-	if lastEvent.Type != Modified {
+	if lastEvent.Type != watch.Modified {
 		t.Fatalf("expected MODIFIED event type, got %v", lastEvent.Type)
 	}
 	if got, isPod := lastEvent.Object.(*fakePod); !isPod {
@@ -63,14 +64,14 @@ func TestUntil(t *testing.T) {
 }
 
 func TestUntilMultipleConditions(t *testing.T) {
-	fw := NewFake()
+	fw := watch.NewFake()
 	go func() {
 		var obj *fakePod
 		fw.Add(obj)
 	}()
 	conditions := []ConditionFunc{
-		func(event Event) (bool, error) { return event.Type == Added, nil },
-		func(event Event) (bool, error) { return event.Type == Added, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
 	}
 
 	timeout := time.Minute
@@ -81,7 +82,7 @@ func TestUntilMultipleConditions(t *testing.T) {
 	if lastEvent == nil {
 		t.Fatal("expected an event")
 	}
-	if lastEvent.Type != Added {
+	if lastEvent.Type != watch.Added {
 		t.Fatalf("expected MODIFIED event type, got %v", lastEvent.Type)
 	}
 	if got, isPod := lastEvent.Object.(*fakePod); !isPod {
@@ -90,15 +91,15 @@ func TestUntilMultipleConditions(t *testing.T) {
 }
 
 func TestUntilMultipleConditionsFail(t *testing.T) {
-	fw := NewFake()
+	fw := watch.NewFake()
 	go func() {
 		var obj *fakePod
 		fw.Add(obj)
 	}()
 	conditions := []ConditionFunc{
-		func(event Event) (bool, error) { return event.Type == Added, nil },
-		func(event Event) (bool, error) { return event.Type == Added, nil },
-		func(event Event) (bool, error) { return event.Type == Deleted, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Deleted, nil },
 	}
 
 	timeout := 10 * time.Second
@@ -109,7 +110,7 @@ func TestUntilMultipleConditionsFail(t *testing.T) {
 	if lastEvent == nil {
 		t.Fatal("expected an event")
 	}
-	if lastEvent.Type != Added {
+	if lastEvent.Type != watch.Added {
 		t.Fatalf("expected ADDED event type, got %v", lastEvent.Type)
 	}
 	if got, isPod := lastEvent.Object.(*fakePod); !isPod {
@@ -118,18 +119,18 @@ func TestUntilMultipleConditionsFail(t *testing.T) {
 }
 
 func TestUntilTimeout(t *testing.T) {
-	fw := NewFake()
+	fw := watch.NewFake()
 	go func() {
 		var obj *fakePod
 		fw.Add(obj)
 		fw.Modify(obj)
 	}()
 	conditions := []ConditionFunc{
-		func(event Event) (bool, error) {
-			return event.Type == Added, nil
+		func(event watch.Event) (bool, error) {
+			return event.Type == watch.Added, nil
 		},
-		func(event Event) (bool, error) {
-			return event.Type == Modified, nil
+		func(event watch.Event) (bool, error) {
+			return event.Type == watch.Modified, nil
 		},
 	}
 
@@ -141,7 +142,7 @@ func TestUntilTimeout(t *testing.T) {
 	if lastEvent == nil {
 		t.Fatal("expected an event")
 	}
-	if lastEvent.Type != Modified {
+	if lastEvent.Type != watch.Modified {
 		t.Fatalf("expected MODIFIED event type, got %v", lastEvent.Type)
 	}
 	if got, isPod := lastEvent.Object.(*fakePod); !isPod {
@@ -150,15 +151,15 @@ func TestUntilTimeout(t *testing.T) {
 }
 
 func TestUntilErrorCondition(t *testing.T) {
-	fw := NewFake()
+	fw := watch.NewFake()
 	go func() {
 		var obj *fakePod
 		fw.Add(obj)
 	}()
 	expected := "something bad"
 	conditions := []ConditionFunc{
-		func(event Event) (bool, error) { return event.Type == Added, nil },
-		func(event Event) (bool, error) { return false, errors.New(expected) },
+		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
+		func(event watch.Event) (bool, error) { return false, errors.New(expected) },
 	}
 
 	timeout := time.Minute

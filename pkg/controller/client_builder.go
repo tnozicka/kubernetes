@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	watchuntil "k8s.io/apimachinery/pkg/watch/until"
 	apiserverserviceaccount "k8s.io/apiserver/pkg/authentication/serviceaccount"
 	clientset "k8s.io/client-go/kubernetes"
 	v1authentication "k8s.io/client-go/kubernetes/typed/authentication/v1"
@@ -140,7 +141,7 @@ func (b SAControllerClientBuilder) Config(name string) (*restclient.Config, erro
 			return b.CoreClient.Secrets(b.Namespace).Watch(options)
 		},
 	}
-	_, err = cache.ListWatchUntil(30*time.Second, lw,
+	_, err = watchuntil.UntilWithInformer(30*time.Second, lw, &v1.Secret{}, 0,
 		func(event watch.Event) (bool, error) {
 			switch event.Type {
 			case watch.Deleted:
