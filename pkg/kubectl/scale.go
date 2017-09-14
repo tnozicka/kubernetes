@@ -25,8 +25,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	//"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	watchuntil "k8s.io/apimachinery/pkg/watch/until"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
@@ -211,6 +214,42 @@ func (scaler *ReplicationControllerScaler) Scale(namespace, name string, newSize
 			}
 			return rc.Status.ObservedGeneration >= rc.Generation && rc.Status.Replicas == rc.Spec.Replicas
 		}
+		fieldSelector := fields.OneTermEqualSelector("metadata.name", name)
+		lw := cache.NewListWatchFromMethods(scaler.c.ReplicationControllers(namespace), fieldSelector)
+		_, err := watchuntil.UntilWithInformer(
+			waitForReplicas.Timeout,
+			lw,
+			&api.ReplicationController{},
+			60*time.Second,
+			func(event watch.Event) (bool, error) {
+				if event.Type != watch.Added && event.Type != watch.Modified {
+					return false, nil
+				}
+				return checkRC(event.Object.(*api.ReplicationController)), nil
+			})
+		if err != nil {
+			return err
+		}
+		//lw := cache.NewListWatchFromClient(scaler.c.ReplicationControllers(), )
+		//client := scaler.c.ReplicationControllers(namespace)
+		//_, err := watchuntil.UntilWithInformer(
+		//	waitForReplicas.Timeout,
+		//	&cache.ListWatch{
+		//		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+		//			options.FieldSelector = fieldSelector
+		//			return client.List(options)
+		//		},
+		//		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+		//			options.FieldSelector = fieldSelector
+		//			return client.Watch(options)
+		//		},
+		//	},
+		//		watcher, func(event watch.Event) (bool, error) {
+		//	if event.Type != watch.Added && event.Type != watch.Modified {
+		//		return false, nil
+		//	}
+		//	return checkRC(event.Object.(*api.ReplicationController)), nil
+		//})
 		// If number of replicas doesn't change, then the update may not event
 		// be sent to underlying databse (we don't send no-op changes).
 		// In such case, <updatedResourceVersion> will have value of the most
@@ -219,30 +258,30 @@ func (scaler *ReplicationControllerScaler) Scale(namespace, name string, newSize
 		// will be deliver, since it may already be in the expected state.
 		// To protect from these two, we first issue Get() to ensure that we
 		// are not already in the expected state.
-		currentRC, err := scaler.c.ReplicationControllers(namespace).Get(name, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		if !checkRC(currentRC) {
-			watchOptions := metav1.ListOptions{
-				FieldSelector:   fields.OneTermEqualSelector("metadata.name", name).String(),
-				ResourceVersion: updatedResourceVersion,
-			}
-			watcher, err := scaler.c.ReplicationControllers(namespace).Watch(watchOptions)
-			if err != nil {
-				return err
-			}
-			_, err = watch.Until(waitForReplicas.Timeout, watcher, func(event watch.Event) (bool, error) {
-				if event.Type != watch.Added && event.Type != watch.Modified {
-					return false, nil
-				}
-				return checkRC(event.Object.(*api.ReplicationController)), nil
-			})
-			if err == wait.ErrWaitTimeout {
-				return fmt.Errorf("timed out waiting for %q to be synced", name)
-			}
-			return err
-		}
+		//currentRC, err := scaler.c.ReplicationControllers(namespace).Get(name, metav1.GetOptions{})
+		//if err != nil {
+		//	return err
+		//}
+		//if !checkRC(currentRC) {
+		//	watchOptions := metav1.ListOptions{
+		//		FieldSelector:   fields.OneTermEqualSelector("metadata.name", name).String(),
+		//		ResourceVersion: updatedResourceVersion,
+		//	}
+		//	watcher, err := scaler.c.ReplicationControllers(namespace).Watch(watchOptions)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	_, err = watch.Until(waitForReplicas.Timeout, watcher, func(event watch.Event) (bool, error) {
+		//		if event.Type != watch.Added && event.Type != watch.Modified {
+		//			return false, nil
+		//		}
+		//		return checkRC(event.Object.(*api.ReplicationController)), nil
+		//	})
+		//	if err == wait.ErrWaitTimeout {
+		//		return fmt.Errorf("timed out waiting for %q to be synced", name)
+		//	}
+		//	return err
+		//}
 	}
 	return nil
 }

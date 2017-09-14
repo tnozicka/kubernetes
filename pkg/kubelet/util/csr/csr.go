@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	watchuntil "k8s.io/apimachinery/pkg/watch/until"
 	certificatesclient "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	certutil "k8s.io/client-go/util/cert"
@@ -109,7 +110,7 @@ func requestCertificate(client certificatesclient.CertificateSigningRequestInter
 
 	fieldSelector := fields.OneTermEqualSelector("metadata.name", req.Name).String()
 
-	event, err := cache.ListWatchUntil(
+	event, err := watchuntil.UntilWithInformer(
 		3600*time.Second,
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
@@ -121,6 +122,8 @@ func requestCertificate(client certificatesclient.CertificateSigningRequestInter
 				return client.Watch(options)
 			},
 		},
+		&certificates.CertificateSigningRequest{},
+		60*time.Second,
 		func(event watch.Event) (bool, error) {
 			switch event.Type {
 			case watch.Modified, watch.Added:

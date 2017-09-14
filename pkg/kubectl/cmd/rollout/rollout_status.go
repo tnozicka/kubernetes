@@ -19,16 +19,20 @@ package rollout
 import (
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/spf13/cobra"
+
+	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/util/interrupt"
-
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -108,7 +112,8 @@ func RunStatus(f cmdutil.Factory, cmd *cobra.Command, out io.Writer, args []stri
 	if err != nil {
 		return err
 	}
-	rv, err := mapping.MetadataAccessor.ResourceVersion(obj)
+
+	restClient, err := f.ClientForMapping(mapping)
 	if err != nil {
 		return err
 	}
@@ -123,41 +128,27 @@ func RunStatus(f cmdutil.Factory, cmd *cobra.Command, out io.Writer, args []stri
 		return fmt.Errorf("revision must be a positive integer: %v", revision)
 	}
 
-	// check if deployment's has finished the rollout
-	status, done, err := statusViewer.Status(cmdNamespace, info.Name, revision)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "%s", status)
-	if done {
-		return nil
-	}
-
-	shouldWatch := cmdutil.GetFlagBool(cmd, "watch")
-	if !shouldWatch {
-		return nil
-	}
-
-	// watch for changes to the deployment
-	w, err := r.Watch(rv)
-	if err != nil {
-		return err
-	}
+	lw := cache.NewListWatchFromClient(restClient, mapping.Resource, info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
+	w := watch.NewInformerWatcher(lw, obj, 60*time.Second)
+	defer w.Stop()
 
 	// if the rollout isn't done yet, keep watching deployment status
 	intr := interrupt.New(nil, w.Stop)
 	return intr.Run(func() error {
-		_, err := watch.Until(0, w, func(e watch.Event) (bool, error) {
+		_, err = watch.Until(0, w, func(e watch.Event) (bool, error) {
 			// print deployment's status
-			status, done, err := statusViewer.Status(cmdNamespace, info.Name, revision)
+			status, done, err := statusViewer.Status(e.Object, revision)
 			if err != nil {
 				return false, err
 			}
+
 			fmt.Fprintf(out, "%s", status)
+
 			// Quit waiting if the rollout is done
 			if done {
 				return true, nil
 			}
+
 			return false, nil
 		})
 		return err

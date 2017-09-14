@@ -19,7 +19,7 @@ package kubectl
 import (
 	"fmt"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/extensions"
@@ -31,7 +31,7 @@ import (
 
 // StatusViewer provides an interface for resources that have rollout status.
 type StatusViewer interface {
-	Status(namespace, name string, revision int64) (string, bool, error)
+	Status(object runtime.Object, revision int64) (string, bool, error)
 }
 
 // StatusViewerFor returns a StatusViewer for the resource specified by kind.
@@ -63,11 +63,9 @@ type StatefulSetStatusViewer struct {
 }
 
 // Status returns a message describing deployment status, and a bool value indicating if the status is considered done.
-func (s *DeploymentStatusViewer) Status(namespace, name string, revision int64) (string, bool, error) {
-	deployment, err := s.c.Deployments(namespace).Get(name, metav1.GetOptions{})
-	if err != nil {
-		return "", false, err
-	}
+func (s *DeploymentStatusViewer) Status(object runtime.Object, revision int64) (string, bool, error) {
+	deployment := object.(*extensions.Deployment)
+
 	if revision > 0 {
 		deploymentRev, err := util.Revision(deployment)
 		if err != nil {
@@ -77,10 +75,11 @@ func (s *DeploymentStatusViewer) Status(namespace, name string, revision int64) 
 			return "", false, fmt.Errorf("desired revision (%d) is different from the running revision (%d)", revision, deploymentRev)
 		}
 	}
+
 	if deployment.Generation <= deployment.Status.ObservedGeneration {
 		cond := util.GetDeploymentConditionInternal(deployment.Status, extensions.DeploymentProgressing)
 		if cond != nil && cond.Reason == util.TimedOutReason {
-			return "", false, fmt.Errorf("deployment %q exceeded its progress deadline", name)
+			return "", false, fmt.Errorf("deployment %q exceeded its progress deadline", deployment.Name)
 		}
 		if deployment.Status.UpdatedReplicas < deployment.Spec.Replicas {
 			return fmt.Sprintf("Waiting for rollout to finish: %d out of %d new replicas have been updated...\n", deployment.Status.UpdatedReplicas, deployment.Spec.Replicas), false, nil
@@ -91,19 +90,17 @@ func (s *DeploymentStatusViewer) Status(namespace, name string, revision int64) 
 		if deployment.Status.AvailableReplicas < deployment.Status.UpdatedReplicas {
 			return fmt.Sprintf("Waiting for rollout to finish: %d of %d updated replicas are available...\n", deployment.Status.AvailableReplicas, deployment.Status.UpdatedReplicas), false, nil
 		}
-		return fmt.Sprintf("deployment %q successfully rolled out\n", name), true, nil
+		return fmt.Sprintf("deployment %q successfully rolled out\n", deployment.Name), true, nil
 	}
+
 	return fmt.Sprintf("Waiting for deployment spec update to be observed...\n"), false, nil
 }
 
 // Status returns a message describing daemon set status, and a bool value indicating if the status is considered done.
-func (s *DaemonSetStatusViewer) Status(namespace, name string, revision int64) (string, bool, error) {
+func (s *DaemonSetStatusViewer) Status(object runtime.Object, revision int64) (string, bool, error) {
 	//ignoring revision as DaemonSets does not have history yet
+	daemon := object.(*extensions.DaemonSet)
 
-	daemon, err := s.c.DaemonSets(namespace).Get(name, metav1.GetOptions{})
-	if err != nil {
-		return "", false, err
-	}
 	if daemon.Spec.UpdateStrategy.Type != extensions.RollingUpdateDaemonSetStrategyType {
 		return "", true, fmt.Errorf("Status is available only for RollingUpdate strategy type")
 	}
@@ -114,17 +111,15 @@ func (s *DaemonSetStatusViewer) Status(namespace, name string, revision int64) (
 		if daemon.Status.NumberAvailable < daemon.Status.DesiredNumberScheduled {
 			return fmt.Sprintf("Waiting for rollout to finish: %d of %d updated pods are available...\n", daemon.Status.NumberAvailable, daemon.Status.DesiredNumberScheduled), false, nil
 		}
-		return fmt.Sprintf("daemon set %q successfully rolled out\n", name), true, nil
+		return fmt.Sprintf("daemon set %q successfully rolled out\n", daemon.Name), true, nil
 	}
 	return fmt.Sprintf("Waiting for daemon set spec update to be observed...\n"), false, nil
 }
 
 // Status returns a message describing statefulset status, and a bool value indicating if the status is considered done.
-func (s *StatefulSetStatusViewer) Status(namespace, name string, revision int64) (string, bool, error) {
-	sts, err := s.c.StatefulSets(namespace).Get(name, metav1.GetOptions{})
-	if err != nil {
-		return "", false, err
-	}
+func (s *StatefulSetStatusViewer) Status(object runtime.Object, revision int64) (string, bool, error) {
+	sts := object.(*apps.StatefulSet)
+
 	if sts.Spec.UpdateStrategy.Type == apps.OnDeleteStatefulSetStrategyType {
 		return "", true, fmt.Errorf("%s updateStrategy does not have a Status`", apps.OnDeleteStatefulSetStrategyType)
 	}
