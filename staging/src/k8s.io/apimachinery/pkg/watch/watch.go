@@ -291,7 +291,7 @@ func NewProxyWatcher(ch chan Event) *ProxyWatcher {
 func (pw ProxyWatcher) Stop() {
 	pw.mutex.Lock()
 	defer pw.mutex.Unlock()
-	if pw.stopped {
+	if !pw.stopped {
 		pw.stopped = true
 		close(pw.result)
 		close(pw.stopCh)

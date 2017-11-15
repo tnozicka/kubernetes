@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
@@ -29,10 +30,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
+	winformer "k8s.io/apimachinery/pkg/watch/informer"
+	wuntil "k8s.io/apimachinery/pkg/watch/until"
+	"k8s.io/client-go/tools/cache"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
@@ -489,20 +494,7 @@ func (options *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []s
 		return err
 	}
 
-	// watching from resourceVersion 0, starts the watch at ~now and
-	// will return an initial watch event.  Starting form ~now, rather
-	// the rv of the object will insure that we start the watch from
-	// inside the watch window, which the rv of the object might not be.
-	rv := "0"
 	isList := meta.IsListType(obj)
-	if isList {
-		// the resourceVersion of list objects is ~now but won't return
-		// an initial watch event
-		rv, err = mapping.MetadataAccessor.ResourceVersion(obj)
-		if err != nil {
-			return err
-		}
-	}
 
 	// print the current object
 	if !options.WatchOnly {
@@ -527,27 +519,33 @@ func (options *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []s
 	}
 
 	// print watched changes
-	w, err := r.Watch(rv)
-	if err != nil {
-		return err
-	}
+	lw := cache.NewListWatchFromClient(info.Client, mapping.Resource, info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
+	w := winformer.NewInformerWatcher(lw, obj, 0)
+	defer w.Stop()
 
 	first := true
 	intr := interrupt.New(nil, w.Stop)
 	intr.Run(func() error {
-		_, err := watch.Until(0, w, func(e watch.Event) (bool, error) {
-			if !isList && first {
-				// drop the initial watch event in the single resource case
-				first = false
-				return false, nil
-			}
-
-			if isFiltered, err := filterFuncs.Filter(e.Object, filterOpts); !isFiltered {
-				if err != nil {
-					glog.V(2).Infof("Unable to filter resource: %v", err)
-				} else if err := printer.PrintObj(e.Object, options.Out); err != nil {
-					return false, err
+		// TODO: expose timeout in CLI
+		timeout := 0 * time.Second
+		_, err := wuntil.Until(timeout, w, func(e watch.Event) (bool, error) {
+			switch e.Type {
+			case watch.Added, watch.Modified, watch.Deleted:
+				if !isList && first {
+					// drop the initial watch event in the single resource case
+					first = false
+					return false, nil
 				}
+
+				if isFiltered, err := filterFuncs.Filter(e.Object, filterOpts); !isFiltered {
+					if err != nil {
+						glog.V(2).Infof("Unable to filter resource: %v", err)
+					} else if err := printer.PrintObj(e.Object, options.Out); err != nil {
+						return false, err
+					}
+				}
+			default:
+				glog.Errorf("Received unknown event: %#v", e)
 			}
 			return false, nil
 		})

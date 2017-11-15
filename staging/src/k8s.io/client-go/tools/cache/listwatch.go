@@ -94,6 +94,7 @@ func NewListWatchFromClient(c Getter, resource string, namespace string, fieldSe
 	return &ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
+// TODO: really think if it's worth it
 func NewListWatchFromMethods(listerWatcher interface{}, fieldSelector fields.Selector) *ListWatch {
 	v := reflect.ValueOf(listerWatcher)
 	t := v.Type()

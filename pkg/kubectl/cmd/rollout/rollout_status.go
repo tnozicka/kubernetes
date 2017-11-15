@@ -23,9 +23,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
+	winformer "k8s.io/apimachinery/pkg/watch/informer"
+	wuntil "k8s.io/apimachinery/pkg/watch/until"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
@@ -130,15 +131,17 @@ func RunStatus(f cmdutil.Factory, cmd *cobra.Command, out io.Writer, args []stri
 	}
 
 	lw := cache.NewListWatchFromClient(restClient, mapping.Resource, info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
-	w := watch.NewInformerWatcher(lw, obj, 60*time.Second)
+	w := winformer.NewInformerWatcher(lw, obj, 60*time.Second)
 	defer w.Stop()
 
 	// if the rollout isn't done yet, keep watching deployment status
 	intr := interrupt.New(nil, w.Stop)
 	return intr.Run(func() error {
-		_, err = watch.Until(0, w, func(e watch.Event) (bool, error) {
+		// TODO: expose the timeout as flag
+		timeout := 0 * time.Second
+		_, err = wuntil.Until(timeout, w, func(e watch.Event) (bool, error) {
 			// print deployment's status
-			status, done, err := statusViewer.Status(e.Object, revision)
+			status, done, err := statusViewer.Status(cmdNamespace, info.Name, revision)
 			if err != nil {
 				return false, err
 			}
