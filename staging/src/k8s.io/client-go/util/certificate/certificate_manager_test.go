@@ -275,30 +275,6 @@ func TestRotateCertCreateCSRError(t *testing.T) {
 	}
 }
 
-func TestRotateCertWaitingForResultError(t *testing.T) {
-	now := time.Now()
-	m := manager{
-		cert: &tls.Certificate{
-			Leaf: &x509.Certificate{
-				NotBefore: now.Add(-2 * time.Hour),
-				NotAfter:  now.Add(-1 * time.Hour),
-			},
-		},
-		template: &x509.CertificateRequest{},
-		usages:   []certificates.KeyUsage{},
-		certSigningRequestClient: fakeClient{
-			failureType: watchError,
-		},
-	}
-
-	certificateWaitBackoff = wait.Backoff{Steps: 1}
-	if success, err := m.rotateCerts(); success {
-		t.Errorf("Got success from 'rotateCerts', wanted failure.")
-	} else if err != nil {
-		t.Errorf("Got error %v from 'rotateCerts', wanted no error.", err)
-	}
-}
-
 func TestNewManagerBootstrap(t *testing.T) {
 	store := &fakeStore{}
 

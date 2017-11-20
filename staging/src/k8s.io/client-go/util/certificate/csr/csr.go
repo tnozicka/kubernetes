@@ -124,7 +124,7 @@ func WaitForCertificate(client certificatesclient.CertificateSigningRequestInter
 	fieldSelector := fields.OneTermEqualSelector("metadata.name", req.Name).String()
 
 	event, err := watchuntil.UntilWithInformer(
-		3600*time.Second,
+		timeout,
 		&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				options.FieldSelector = fieldSelector
