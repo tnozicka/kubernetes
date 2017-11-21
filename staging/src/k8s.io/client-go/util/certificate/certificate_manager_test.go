@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/wait"
 	watch "k8s.io/apimachinery/pkg/watch"
 	certificatesclient "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 )

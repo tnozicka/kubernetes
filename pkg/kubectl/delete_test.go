@@ -24,16 +24,18 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/watch"
 	testcore "k8s.io/client-go/testing"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/extensions"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
+	fakeclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 	coreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
 )
 
@@ -64,7 +66,7 @@ func TestReplicationControllerStop(t *testing.T) {
 				},
 			},
 			StopError:       nil,
-			ExpectedActions: []string{"get", "list", "get", "update", "get", "delete"},
+			ExpectedActions: []string{"get", "list", "get", "update", "list", "watch", "delete"},
 		},
 		{
 			Name: "NoOverlapping",
@@ -93,7 +95,7 @@ func TestReplicationControllerStop(t *testing.T) {
 				},
 			},
 			StopError:       nil,
-			ExpectedActions: []string{"get", "list", "get", "update", "get", "delete"},
+			ExpectedActions: []string{"get", "list", "get", "update", "list", "watch", "delete"},
 		},
 		{
 			Name: "OverlappingError",
@@ -201,35 +203,54 @@ func TestReplicationControllerStop(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		copiedForWatch := test.Objs[0].DeepCopyObject()
-		fake := fake.NewSimpleClientset(test.Objs...)
-		fakeWatch := watch.NewFake()
-		fake.PrependWatchReactor("replicationcontrollers", testcore.DefaultWatchReactor(fakeWatch, nil))
+		t.Run(test.Name, func(t *testing.T) {
+			copiedForWatch := test.Objs[0].DeepCopyObject()
+			fake := fakeclientset.NewSimpleClientset(test.Objs...)
+			fakeWatch := watch.NewFakeWithChanSize(100, false)
+			defer fakeWatch.Stop()
 
-		go func() {
-			fakeWatch.Add(copiedForWatch)
-		}()
-
-		reaper := ReplicationControllerReaper{fake.Core(), time.Millisecond, time.Millisecond}
-		err := reaper.Stop(ns, name, 0, nil)
-		if !reflect.DeepEqual(err, test.StopError) {
-			t.Errorf("%s unexpected error: %v", test.Name, err)
-			continue
-		}
-
-		actions := fake.Actions()
-		if len(actions) != len(test.ExpectedActions) {
-			t.Errorf("%s unexpected actions: %v, expected %d actions got %d", test.Name, actions, len(test.ExpectedActions), len(actions))
-			continue
-		}
-		for i, verb := range test.ExpectedActions {
-			if actions[i].GetResource().GroupResource() != api.Resource("replicationcontrollers") {
-				t.Errorf("%s unexpected action: %+v, expected %s-replicationController", test.Name, actions[i], verb)
+			fake.PrependWatchReactor("replicationcontrollers", testcore.DefaultWatchReactor(fakeWatch, nil))
+			if meta.IsListType(copiedForWatch) {
+				list, err := meta.ExtractList(copiedForWatch)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				scheme := runtime.NewScheme()
+				fakeclientset.AddToScheme(scheme)
+				errs := runtime.DecodeList(list, serializer.NewCodecFactory(scheme).UniversalDecoder())
+				if len(errs) > 0 {
+					t.Error(errs)
+					return
+				}
+				for _, obj := range list {
+					fakeWatch.Add(obj)
+				}
+			} else {
+				fakeWatch.Add(copiedForWatch)
 			}
-			if actions[i].GetVerb() != verb {
-				t.Errorf("%s unexpected action: %+v, expected %s-replicationController", test.Name, actions[i], verb)
+
+			reaper := ReplicationControllerReaper{fake.Core(), time.Millisecond, time.Millisecond}
+			err := reaper.Stop(ns, name, 0, nil)
+			if !reflect.DeepEqual(err, test.StopError) {
+				t.Errorf("unexpected error: %v", err)
+				return
 			}
-		}
+
+			actions := fake.Actions()
+			if len(actions) != len(test.ExpectedActions) {
+				t.Errorf("unexpected actions: %v, expected %d actions got %d", actions, len(test.ExpectedActions), len(actions))
+				return
+			}
+			for i, verb := range test.ExpectedActions {
+				if actions[i].GetResource().GroupResource() != api.Resource("replicationcontrollers") {
+					t.Errorf("unexpected action: %+v, expected %s-replicationController", actions[i], verb)
+				}
+				if actions[i].GetVerb() != verb {
+					t.Errorf("unexpected action: %+v, expected %s-replicationController", actions[i], verb)
+				}
+			}
+		})
 	}
 }
 
@@ -299,7 +320,7 @@ func TestReplicaSetStop(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fake := fake.NewSimpleClientset(test.Objs...)
+		fake := fakeclientset.NewSimpleClientset(test.Objs...)
 		reaper := ReplicaSetReaper{fake.Extensions(), time.Millisecond, time.Millisecond}
 		err := reaper.Stop(ns, name, 0, nil)
 		if !reflect.DeepEqual(err, test.StopError) {
@@ -395,7 +416,7 @@ func TestJobStop(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fake := fake.NewSimpleClientset(test.Objs...)
+		fake := fakeclientset.NewSimpleClientset(test.Objs...)
 		reaper := JobReaper{fake.Batch(), fake.Core(), time.Millisecond, time.Millisecond}
 		err := reaper.Stop(ns, name, 0, nil)
 		if !reflect.DeepEqual(err, test.StopError) {
@@ -519,7 +540,7 @@ func TestDeploymentStop(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fake := fake.NewSimpleClientset(test.Objs...)
+		fake := fakeclientset.NewSimpleClientset(test.Objs...)
 		reaper := DeploymentReaper{fake.Extensions(), fake.Extensions(), time.Millisecond, time.Millisecond}
 		err := reaper.Stop(ns, name, 0, nil)
 		if !reflect.DeepEqual(err, test.StopError) {
@@ -564,7 +585,7 @@ func (c *noDeletePod) Delete(name string, o *metav1.DeleteOptions) error {
 }
 
 type reaperFake struct {
-	*fake.Clientset
+	*fakeclientset.Clientset
 	noSuchPod, noDeletePod bool
 }
 
@@ -602,7 +623,7 @@ func TestSimpleStop(t *testing.T) {
 	}{
 		{
 			fake: &reaperFake{
-				Clientset: fake.NewSimpleClientset(pod()),
+				Clientset: fakeclientset.NewSimpleClientset(pod()),
 			},
 			kind: api.Kind("Pod"),
 			actions: []testcore.Action{
@@ -614,7 +635,7 @@ func TestSimpleStop(t *testing.T) {
 		},
 		{
 			fake: &reaperFake{
-				Clientset: fake.NewSimpleClientset(),
+				Clientset: fakeclientset.NewSimpleClientset(),
 				noSuchPod: true,
 			},
 			kind:        api.Kind("Pod"),
@@ -624,7 +645,7 @@ func TestSimpleStop(t *testing.T) {
 		},
 		{
 			fake: &reaperFake{
-				Clientset:   fake.NewSimpleClientset(pod()),
+				Clientset:   fakeclientset.NewSimpleClientset(pod()),
 				noDeletePod: true,
 			},
 			kind: api.Kind("Pod"),
@@ -680,7 +701,7 @@ func TestDeploymentNotFoundError(t *testing.T) {
 		},
 	}
 
-	fake := fake.NewSimpleClientset(
+	fake := fakeclientset.NewSimpleClientset(
 		deployment,
 		&extensions.ReplicaSetList{Items: []extensions.ReplicaSet{
 			{

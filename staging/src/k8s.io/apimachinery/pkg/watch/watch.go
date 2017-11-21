@@ -293,7 +293,6 @@ func (pw ProxyWatcher) Stop() {
 	defer pw.mutex.Unlock()
 	if !pw.stopped {
 		pw.stopped = true
-		close(pw.result)
 		close(pw.stopCh)
 	}
 }

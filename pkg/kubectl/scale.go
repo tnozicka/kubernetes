@@ -219,9 +219,19 @@ func (scaler *ReplicationControllerScaler) Scale(namespace, name string, newSize
 		lw := cache.NewListWatchFromMethods(scaler.c.ReplicationControllers(namespace), fieldSelector)
 		_, err := watchuntil.UntilWithInformer(
 			waitForReplicas.Timeout,
+			//&cache.ListWatch{
+			//	ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			//		options.FieldSelector = fieldSelector.String()
+			//		return scaler.c.ReplicationControllers(namespace).List(options)
+			//	},
+			//	WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			//		options.FieldSelector = fieldSelector.String()
+			//		return scaler.c.ReplicationControllers(namespace).Watch(options)
+			//	},
+			//},
 			lw,
 			&api.ReplicationController{},
-			60*time.Second,
+			0,
 			func(event watch.Event) (bool, error) {
 				if event.Type != watch.Added && event.Type != watch.Modified {
 					return false, nil
