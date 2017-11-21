@@ -288,7 +288,7 @@ func NewProxyWatcher(ch chan Event) *ProxyWatcher {
 }
 
 // Stop implements Interface
-func (pw ProxyWatcher) Stop() {
+func (pw *ProxyWatcher) Stop() {
 	pw.mutex.Lock()
 	defer pw.mutex.Unlock()
 	if !pw.stopped {
@@ -298,11 +298,11 @@ func (pw ProxyWatcher) Stop() {
 }
 
 // ResultChan implements Interface
-func (pw ProxyWatcher) ResultChan() <-chan Event {
+func (pw *ProxyWatcher) ResultChan() <-chan Event {
 	return pw.result
 }
 
-// ResultChan implements Interface
-func (pw ProxyWatcher) StopChan() <-chan struct{} {
+// StopChan returns stop channel
+func (pw *ProxyWatcher) StopChan() <-chan struct{} {
 	return pw.stopCh
 }

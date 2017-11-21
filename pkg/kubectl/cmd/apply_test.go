@@ -1096,9 +1096,9 @@ func TestForceApply(t *testing.T) {
 	deleted := false
 	counts := map[string]int{}
 	expected := map[string]int{
-		"getOk":       9,
+		"getOk":       8,
 		"getNotFound": 1,
-		"getList":     1,
+		"getList":     3,
 		"patch":       6,
 		"delete":      1,
 		"put":         1,
