@@ -694,15 +694,6 @@ func TestServerHealth(t *testing.T) {
 			expectRotateFail: true,
 			expectHealthy:    true,
 		},
-		{
-			description: "Conflict error on watch",
-			certs:       currentCerts,
-
-			failureType:      watchError,
-			clientErr:        errors.NewGenericServerResponse(409, "POST", schema.GroupResource{}, "", "", 0, false),
-			expectRotateFail: true,
-			expectHealthy:    false,
-		},
 	}
 
 	for _, tc := range testCases {
