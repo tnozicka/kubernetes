@@ -100,14 +100,14 @@ func Until(timeout time.Duration, watcher watch.Interface, conditions ...Conditi
 // Due to this guarantee there is no way it can deal with 'Resource version too old error'. It will fail in this case.
 // The most frequent usage would be for test where you want to verify exact order of events.
 //
-// UntilWithRetry will wrap the watchFunc with RetryWatcher making sure that watcher gets restarted in case of errors.
+// UntilWithRetry wraps the watchFunc with RetryWatcher making sure that watcher gets restarted in case of errors.
 // The initialResourceVersion will be given to watchFunc when first called.
 // Remaining behaviour is identical to function Until. (See above.)
 func UntilWithRetry(timeout time.Duration, initialResourceVersion string, watchFunc wretry.WatchFunc, conditions ...ConditionFunc) (*watch.Event, error) {
 	return Until(timeout, wretry.NewRetryWatcher(initialResourceVersion, watchFunc), conditions...)
 }
 
-// UntilWithInformer can deal with all erros like API timeout, lost connections or 'Resource version too old'.
+// UntilWithInformer can deal with all errors like API timeout, lost connections or 'Resource version too old'.
 // On the other hand it can't provide you with guarantees as strong as UntilWithRetry. It can miss some events
 // in case of watch function failing but it will re-list to recover.
 // The most frequent usage would be for commands that need to watch the "state of the world" and should't fail. ("small" controllers)

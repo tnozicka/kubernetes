@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	wuntil "k8s.io/apimachinery/pkg/watch/until"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
@@ -152,16 +153,22 @@ func TestQuota(t *testing.T) {
 }
 
 func waitForQuota(t *testing.T, quota *v1.ResourceQuota, clientset *clientset.Clientset) {
-	w, err := clientset.Core().ResourceQuotas(quota.Namespace).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: quota.Name}))
+	rq, err := clientset.Core().ResourceQuotas(quota.Namespace).Create(quota)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, err := clientset.Core().ResourceQuotas(quota.Namespace).Create(quota); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	watchFunc := func(sinceResourceVersion string) watch.Interface {
+		w, err := clientset.Core().ResourceQuotas(quota.Namespace).Watch(metav1.ListOptions{
+			FieldSelector:   fields.OneTermEqualSelector("metadata.name", quota.Name).String(),
+			ResourceVersion: sinceResourceVersion,
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		return w
 	}
-
-	_, err = watch.Until(1*time.Minute, w, func(event watch.Event) (bool, error) {
+	_, err = wuntil.UntilWithRetry(1*time.Minute, rq.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Modified:
 		default:
@@ -209,16 +216,22 @@ func scale(t *testing.T, namespace string, clientset *clientset.Clientset) {
 		},
 	}
 
-	w, err := clientset.Core().ReplicationControllers(namespace).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: rc.Name}))
+	rc, err := clientset.Core().ReplicationControllers(namespace).Create(rc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, err := clientset.Core().ReplicationControllers(namespace).Create(rc); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	watchFunc := func(sinceResourceVersion string) watch.Interface {
+		w, err := clientset.Core().ReplicationControllers(namespace).Watch(metav1.ListOptions{
+			FieldSelector:   fields.OneTermEqualSelector("metadata.name", rc.Name).String(),
+			ResourceVersion: sinceResourceVersion,
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		return w
 	}
-
-	_, err = watch.Until(3*time.Minute, w, func(event watch.Event) (bool, error) {
+	_, err = wuntil.UntilWithRetry(3*time.Minute, rc.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Modified:
 		default:

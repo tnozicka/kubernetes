@@ -24,10 +24,10 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-// Watch function is responsible for creating a watcher starting at sinceResourceVersion.
+// WatchFunc is a function that is responsible for creating a watcher starting at sinceResourceVersion.
 type WatchFunc func(sinceResourceVersion string) watch.Interface
 
-// Type of an event that will be returned if RetryWatcher fails
+// RetryWatcherError is the type of an event that will be returned if RetryWatcher fails.
 type RetryWatcherError string
 
 // Implements interface.
@@ -38,16 +38,16 @@ func (obj RetryWatcherError) DeepCopyObject() runtime.Object { return obj }
 
 // Interface to get resource version from events.
 // We can't reuse an interface from meta otherwise it would be a cyclic dependency and we need just this one method
-type resourceVersionInterface interface {
+type resourceVersionGetter interface {
 	GetResourceVersion() string
 }
 
-// Watchers can be closed e.g. in case API timeout is reached, etcd timeout, ...
-// RetryWatcher will make sure that in case the watcher is closed it will get restarted
-// from the last point without the consumer even knowing about it. RetryWatcher does that
-// by inspecting events and keeping track of resourceVersion.
+// RetryWatcher will make sure that in case the underlying watcher is closed (e.g. due to API timeout or etcd timeout)
+// it will get restarted from the last point without the consumer even knowing about it.
+// RetryWatcher does that by inspecting events and keeping track of resourceVersion.
 // Especially useful when using watch.Until where premature termination is causing troubles and flakes.
-// Please note that this is not resilient to ETCD cache not having the resource version anymore - you would need to use Informers for that.
+// Please note that this is not resilient to ETCD cache not having the resource version anymore - you would need to
+// use Informers for that.
 type RetryWatcher struct {
 	lastResourceVersion string
 	watchFunc           WatchFunc
@@ -55,7 +55,7 @@ type RetryWatcher struct {
 	stopChan            chan struct{}
 }
 
-// Creates a new RetryWatcher.
+// NewRetryWatcher creates a new RetryWatcher.
 // It will make sure that watcher gets restarted in case of recoverable errors.
 // The initialResourceVersion will be given to watchFunc when first called.
 func NewRetryWatcher(initialResourceVersion string, watchFunc WatchFunc) *RetryWatcher {
@@ -69,71 +69,74 @@ func NewRetryWatcher(initialResourceVersion string, watchFunc WatchFunc) *RetryW
 	return rw
 }
 
-// receive reads the result from a watcher, restarting it if necessary.
-func (rw *RetryWatcher) receive() {
+// doReceive returns true when it is done, false otherwise
+func (rw *RetryWatcher) doReceive() bool {
+	watcher := rw.watchFunc(rw.lastResourceVersion)
+	if watcher == nil {
+		return false
+	}
+	ch := watcher.ResultChan()
+	defer watcher.Stop()
+
 	for {
-		// We need to wrap this code in a function so the old watchers are freed by defer between retries
-		done := func() bool {
-			watcher := rw.watchFunc(rw.lastResourceVersion)
-			if watcher == nil {
+		select {
+		case event, ok := <-ch:
+			if !ok {
 				return false
 			}
-			ch := watcher.ResultChan()
-			defer watcher.Stop()
 
-			select {
-			case event, ok := <-ch:
+			// We need to inspect the event and get ResourceVersion out of it
+			switch t := event.Type; t {
+			case watch.Added, watch.Modified, watch.Deleted:
+				metaObject, ok := event.Object.(resourceVersionGetter)
 				if !ok {
-					return false
-				}
-
-				// We need to inspect the event and get ResourceVersion out of it
-				switch t := event.Type; t {
-				case watch.Added, watch.Modified, watch.Deleted:
-					metaObject, ok := event.Object.(resourceVersionInterface)
-					if !ok {
-						rw.resultChan <- watch.Event{
-							Type:   watch.Error,
-							Object: RetryWatcherError("__internal__: RetryWatcher: doen't support resourceversion"),
-						}
-						// We have to abort here because this might cause lastResourceVersion inconsistency!
-						return true
-					}
-
-					resourceVersion := metaObject.GetResourceVersion()
-					if resourceVersion == "" {
-						rw.resultChan <- watch.Event{
-							Type:   watch.Error,
-							Object: RetryWatcherError(fmt.Sprintf("__internal__: RetryWatcher: object %#v doesn't support resourceVersion", event.Object)),
-						}
-						// We have to abort here because this might cause lastResourceVersion inconsistency!
-						return true
-					}
-
-					// All is fine; update lastResourceVersion and send the event
-					rw.lastResourceVersion = resourceVersion
-					rw.resultChan <- event
-
-					return false
-
-				case watch.Error:
-					rw.resultChan <- event
-					// TODO: check if there is a reasonable error to retry here
-					return true
-
-				default:
 					rw.resultChan <- watch.Event{
 						Type:   watch.Error,
-						Object: RetryWatcherError(fmt.Sprintf("__internal__: RetryWatcher failed to recognize Event type %q", t)),
+						Object: RetryWatcherError("__internal__: RetryWatcher: doesn't support resourceVersion"),
 					}
 					// We have to abort here because this might cause lastResourceVersion inconsistency!
 					return true
 				}
-			case <-rw.stopChan:
+
+				resourceVersion := metaObject.GetResourceVersion()
+				if resourceVersion == "" {
+					rw.resultChan <- watch.Event{
+						Type:   watch.Error,
+						Object: RetryWatcherError(fmt.Sprintf("__internal__: RetryWatcher: object %#v doesn't support resourceVersion", event.Object)),
+					}
+					// We have to abort here because this might cause lastResourceVersion inconsistency!
+					return true
+				}
+
+				// All is fine; update lastResourceVersion and send the event
+				rw.lastResourceVersion = resourceVersion
+				rw.resultChan <- event
+
+				return false
+
+			case watch.Error:
+				rw.resultChan <- event
+				// TODO: check if there is a reasonable error to retry here
+				return true
+
+			default:
+				rw.resultChan <- watch.Event{
+					Type:   watch.Error,
+					Object: RetryWatcherError(fmt.Sprintf("__internal__: RetryWatcher failed to recognize Event type %q", t)),
+				}
+				// We have to abort here because this might cause lastResourceVersion inconsistency!
 				return true
 			}
-		}()
+		case <-rw.stopChan:
+			return true
+		}
+	}
+}
 
+// receive reads the result from a watcher, restarting it if necessary.
+func (rw *RetryWatcher) receive() {
+	for {
+		done := rw.doReceive()
 		if done {
 			break
 		}

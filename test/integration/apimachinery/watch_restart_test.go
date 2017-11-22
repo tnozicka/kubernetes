@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,7 +36,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/test/integration/framework"
 )
 
@@ -51,10 +52,9 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 	_, s, closeFn := framework.RunAMaster(masterConfig)
 	defer closeFn()
 
-	gv := &api.Registry.GroupOrDie(v1.GroupName).GroupVersion
 	config := &restclient.Config{
 		Host:          s.URL,
-		ContentConfig: restclient.ContentConfig{GroupVersion: gv},
+		ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[corev1.GroupName].GroupVersion()},
 	}
 
 	namespaceObject := framework.CreateTestingNamespace("retry-watch", s, t)
