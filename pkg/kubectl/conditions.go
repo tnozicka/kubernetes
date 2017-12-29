@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	wtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/api/pod"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
@@ -228,7 +229,7 @@ func PodNotPending(event watch.Event) (bool, error) {
 
 // PodContainerRunning returns false until the named container has ContainerStatus running (at least once),
 // and will return an error if the pod is deleted, runs to completion, or the container pod is not available.
-func PodContainerRunning(containerName string) watch.ConditionFunc {
+func PodContainerRunning(containerName string) wtools.ConditionFunc {
 	return func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Deleted:

@@ -29,13 +29,16 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	wtools "k8s.io/client-go/tools/watch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	apiv1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
@@ -260,24 +263,22 @@ func GetFirstPod(client coreclient.PodsGetter, namespace string, selector string
 	}
 
 	// Watch until we observe a pod
-	options.ResourceVersion = podList.ResourceVersion
-	w, err := client.Pods(namespace).Watch(options)
+	lw := cache.NewListWatchFromMethods(client.Pods(namespace), fields.Everything())
+	event, err := wtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(event watch.Event) (bool, error) {
+		if event.Type == watch.Added {
+			return true, nil
+		}
+		return false, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	defer w.Stop()
 
-	condition := func(event watch.Event) (bool, error) {
-		return event.Type == watch.Added || event.Type == watch.Modified, nil
-	}
-	event, err := watch.Until(timeout, w, condition)
-	if err != nil {
-		return nil, 0, err
-	}
 	pod, ok := event.Object.(*api.Pod)
 	if !ok {
 		return nil, 0, fmt.Errorf("%#v is not a pod event", event)
 	}
+
 	return pod, 1, nil
 }
 

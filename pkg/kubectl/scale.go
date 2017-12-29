@@ -24,8 +24,12 @@ import (
 	autoscalingapi "k8s.io/api/autoscaling/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
+	wtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
@@ -212,11 +216,30 @@ func (scaler *ReplicationControllerScaler) Scale(namespace, name string, newSize
 		if rc.Initializers != nil {
 			return nil
 		}
-		err = wait.PollImmediate(waitForReplicas.Interval, waitForReplicas.Timeout, ControllerHasDesiredReplicas(scaler.c, rc))
-		if err == wait.ErrWaitTimeout {
-			return fmt.Errorf("timed out waiting for %q to be synced", name)
+
+		checkRC := func(rc *api.ReplicationController) bool {
+			if uint(rc.Spec.Replicas) != newSize {
+				// the size is changed by other party. Don't need to wait for the new change to complete.
+				return true
+			}
+			return rc.Status.ObservedGeneration >= rc.Generation && rc.Status.Replicas == rc.Spec.Replicas
 		}
-		return err
+		fieldSelector := fields.OneTermEqualSelector("metadata.name", name)
+		lw := cache.NewListWatchFromMethods(scaler.c.ReplicationControllers(namespace), fieldSelector)
+		_, err = wtools.UntilWithInformer(
+			waitForReplicas.Timeout,
+			lw,
+			&api.ReplicationController{},
+			0,
+			func(event watch.Event) (bool, error) {
+				if event.Type != watch.Added && event.Type != watch.Modified {
+					return false, nil
+				}
+				return checkRC(event.Object.(*api.ReplicationController)), nil
+			})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

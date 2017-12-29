@@ -70,8 +70,10 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	wtools "k8s.io/client-go/tools/watch"
 
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
@@ -832,11 +834,8 @@ func WaitForNamespacesDeleted(c clientset.Interface, namespaces []string, timeou
 }
 
 func waitForServiceAccountInNamespace(c clientset.Interface, ns, serviceAccountName string, timeout time.Duration) error {
-	w, err := c.CoreV1().ServiceAccounts(ns).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: serviceAccountName}))
-	if err != nil {
-		return err
-	}
-	_, err = watch.Until(timeout, w, conditions.ServiceAccountHasSecrets)
+	lw := cache.NewListWatchFromMethods(c.CoreV1().ServiceAccounts(ns), fields.OneTermEqualSelector("metadata.name", serviceAccountName))
+	_, err := wtools.UntilWithInformer(timeout, lw, &v1.ServiceAccount{}, 0, conditions.ServiceAccountHasSecrets)
 	return err
 }
 
@@ -1547,15 +1546,8 @@ func WaitForPodSuccessInNamespaceSlow(c clientset.Interface, podName string, nam
 
 // WaitForRCToStabilize waits till the RC has a matching generation/replica count between spec and status.
 func WaitForRCToStabilize(c clientset.Interface, ns, name string, timeout time.Duration) error {
-	options := metav1.ListOptions{FieldSelector: fields.Set{
-		"metadata.name":      name,
-		"metadata.namespace": ns,
-	}.AsSelector().String()}
-	w, err := c.CoreV1().ReplicationControllers(ns).Watch(options)
-	if err != nil {
-		return err
-	}
-	_, err = watch.Until(timeout, w, func(event watch.Event) (bool, error) {
+	lw := cache.NewListWatchFromMethods(c.CoreV1().ReplicationControllers(ns), fields.OneTermEqualSelector("metadata.name", name))
+	_, err := wtools.UntilWithInformer(timeout, lw, &v1.ReplicationController{}, 0, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Deleted:
 			return false, apierrs.NewNotFound(schema.GroupResource{Resource: "replicationcontrollers"}, "")

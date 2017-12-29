@@ -1190,9 +1190,8 @@ func TestForceApply(t *testing.T) {
 	pathRC := "/namespaces/test/replicationcontrollers/" + nameRC
 	pathRCList := "/namespaces/test/replicationcontrollers"
 	expected := map[string]int{
-		"getOk":       10,
+		"getOk":       9,
 		"getNotFound": 1,
-		"getList":     1,
 		"patch":       6,
 		"delete":      1,
 		"put":         1,
@@ -1231,7 +1230,6 @@ func TestForceApply(t *testing.T) {
 						}
 						return &http.Response{StatusCode: 200, Header: defaultHeader(), Body: bodyRC}, nil
 					case strings.HasSuffix(p, pathRCList) && m == "GET":
-						counts["getList"]++
 						rcObj := readUnstructuredFromFile(t, filenameRC)
 						list := &unstructured.UnstructuredList{
 							Object: map[string]interface{}{

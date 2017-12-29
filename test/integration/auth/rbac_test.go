@@ -38,6 +38,7 @@ import (
 	"k8s.io/apiserver/pkg/registry/generic"
 	externalclientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	wtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/api/testapi"
@@ -526,11 +527,16 @@ func TestBootstrapping(t *testing.T) {
 
 	clientset := clientset.NewForConfigOrDie(&restclient.Config{BearerToken: superUser, Host: s.URL, ContentConfig: restclient.ContentConfig{GroupVersion: testapi.Groups[api.GroupName].GroupVersion()}})
 
-	watcher, err := clientset.Rbac().ClusterRoles().Watch(metav1.ListOptions{ResourceVersion: "0"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	watchFunc := func(sinceResourceVersion string) watch.Interface {
+		w, err := clientset.Rbac().ClusterRoles().Watch(metav1.ListOptions{
+			ResourceVersion: sinceResourceVersion,
+		})
+		if err != nil {
+			t.Logf("Failed to create Watch: %v", err)
+		}
+		return w
 	}
-	_, err = watch.Until(30*time.Second, watcher, func(event watch.Event) (bool, error) {
+	_, err := wtools.UntilWithRetry(30*time.Second, "", watchFunc, func(event watch.Event) (bool, error) {
 		if event.Type != watch.Added {
 			return false, nil
 		}
