@@ -29,7 +29,6 @@ import (
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -241,10 +240,12 @@ func NewFactory(optionalClientConfig clientcmd.ClientConfig) Factory {
 
 // GetFirstPod returns a pod matching the namespace and label selector
 // and the number of all pods that match the label selector.
-func GetFirstPod(client coreclient.PodsGetter, namespace string, selector string, timeout time.Duration, sortBy func([]*v1.Pod) sort.Interface) (*api.Pod, int, error) {
-	options := metav1.ListOptions{LabelSelector: selector}
+func GetFirstPod(client coreclient.PodsGetter, namespace string, labelSelector string, timeout time.Duration, sortBy func([]*v1.Pod) sort.Interface) (*api.Pod, int, error) {
+	listOptions := metav1.ListOptions{
+		LabelSelector: labelSelector,
+	}
 
-	podList, err := client.Pods(namespace).List(options)
+	podList, err := client.Pods(namespace).List(listOptions)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -262,8 +263,8 @@ func GetFirstPod(client coreclient.PodsGetter, namespace string, selector string
 		return internalPod, len(podList.Items), nil
 	}
 
-	// Watch until we observe a pod
-	lw := cache.NewListWatchFromMethods(client.Pods(namespace), fields.Everything())
+	// Wait until we observe a pod
+	lw := cache.NewListWatchFromMethods(client.Pods(namespace), listOptions)
 	event, err := wtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(event watch.Event) (bool, error) {
 		if event.Type == watch.Added {
 			return true, nil

@@ -43,7 +43,6 @@ func TestNewListWatchFromMethods(t *testing.T) {
 		},
 	}
 
-	fieldSelector := fields.OneTermEqualSelector("metadata.name", "test")
 	for _, tmptc := range tt {
 		tc := tmptc // we need to copy it for parallel runs
 		t.Run("", func(t *testing.T) {
@@ -51,7 +50,10 @@ func TestNewListWatchFromMethods(t *testing.T) {
 			r := func() (i interface{}) {
 				defer func() { i = recover() }()
 
-				lw := NewListWatchFromMethods(tc.obj, fieldSelector)
+				listOptions := metav1.ListOptions{
+					FieldSelector: fields.OneTermEqualSelector("metadata.name", "test").String(),
+				}
+				lw := NewListWatchFromMethods(tc.obj, listOptions)
 				options := metav1.ListOptions{}
 				_, _ = lw.List(options)
 				_, _ = lw.Watch(options)

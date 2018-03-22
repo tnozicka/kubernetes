@@ -104,8 +104,22 @@ func NewFilteredListWatchFromClient(c Getter, resource string, namespace string,
 	return &ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
+// copyOptionsForInformer copies only those options being allowed to be set in List and Watch for an Informer
+func applyUserListOptions(options metav1.ListOptions, to *metav1.ListOptions) {
+	/*
+	 * Can't copy:
+	 * - ResourceVersion
+	 * - Timeout
+	 * as that is used by informers
+	 */
+
+	to.LabelSelector = options.LabelSelector
+	to.FieldSelector = options.FieldSelector
+	to.IncludeUninitialized = options.IncludeUninitialized
+}
+
 // TODO: really think if it's worth it
-func NewListWatchFromMethods(listerWatcher interface{}, fieldSelector fields.Selector) *ListWatch {
+func NewListWatchFromMethods(listerWatcher interface{}, userListOptions metav1.ListOptions) *ListWatch {
 	v := reflect.ValueOf(listerWatcher)
 	t := v.Type()
 
@@ -131,7 +145,7 @@ func NewListWatchFromMethods(listerWatcher interface{}, fieldSelector fields.Sel
 
 	return &ListWatch{
 		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-			options.FieldSelector = fieldSelector.String()
+			applyUserListOptions(userListOptions, &options)
 			results := v.MethodByName("List").Call([]reflect.Value{reflect.ValueOf(options)})
 
 			var resObj runtime.Object
@@ -149,7 +163,7 @@ func NewListWatchFromMethods(listerWatcher interface{}, fieldSelector fields.Sel
 			return resObj, resErr
 		},
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			options.FieldSelector = fieldSelector.String()
+			applyUserListOptions(userListOptions, &options)
 			results := v.MethodByName("Watch").Call([]reflect.Value{reflect.ValueOf(options)})
 
 			var resObj watch.Interface

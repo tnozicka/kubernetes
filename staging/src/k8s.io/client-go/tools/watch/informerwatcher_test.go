@@ -26,7 +26,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
@@ -139,7 +138,7 @@ func TestNewInformerWatcher(t *testing.T) {
 				fakeWatch.Action(e.Type, e.Object)
 			}
 
-			lw := cache.NewListWatchFromMethods(fake.Core().Secrets(""), fields.Everything())
+			lw := cache.NewListWatchFromMethods(fake.Core().Secrets(""), metav1.ListOptions{})
 			w := NewInformerWatcher(lw, &corev1.Secret{}, 0)
 
 			var result []watch.Event

@@ -426,7 +426,8 @@ func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition 
 	intr := interrupt.New(nil, w.Stop)
 	var result *api.Pod
 	err = intr.Run(func() error {
-		lw := cache.NewListWatchFromMethods(podClient.Pods(ns), fields.OneTermEqualSelector("metadata.name", name))
+		fieldSelector := fields.OneTermEqualSelector("metadata.name", name).String()
+		lw := cache.NewListWatchFromMethods(podClient.Pods(ns), metav1.ListOptions{FieldSelector: fieldSelector})
 		ev, err := wtools.UntilWithInformer(0, lw, &api.Pod{}, 0, func(ev watch.Event) (bool, error) {
 			return exitCondition(ev)
 		})

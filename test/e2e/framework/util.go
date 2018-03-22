@@ -834,7 +834,10 @@ func WaitForNamespacesDeleted(c clientset.Interface, namespaces []string, timeou
 }
 
 func waitForServiceAccountInNamespace(c clientset.Interface, ns, serviceAccountName string, timeout time.Duration) error {
-	lw := cache.NewListWatchFromMethods(c.CoreV1().ServiceAccounts(ns), fields.OneTermEqualSelector("metadata.name", serviceAccountName))
+	listOptions := metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", serviceAccountName).String(),
+	}
+	lw := cache.NewListWatchFromMethods(c.CoreV1().ServiceAccounts(ns), listOptions)
 	_, err := wtools.UntilWithInformer(timeout, lw, &v1.ServiceAccount{}, 0, conditions.ServiceAccountHasSecrets)
 	return err
 }
@@ -1546,7 +1549,10 @@ func WaitForPodSuccessInNamespaceSlow(c clientset.Interface, podName string, nam
 
 // WaitForRCToStabilize waits till the RC has a matching generation/replica count between spec and status.
 func WaitForRCToStabilize(c clientset.Interface, ns, name string, timeout time.Duration) error {
-	lw := cache.NewListWatchFromMethods(c.CoreV1().ReplicationControllers(ns), fields.OneTermEqualSelector("metadata.name", name))
+	listOptions := metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
+	}
+	lw := cache.NewListWatchFromMethods(c.CoreV1().ReplicationControllers(ns), listOptions)
 	_, err := wtools.UntilWithInformer(timeout, lw, &v1.ReplicationController{}, 0, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Deleted:

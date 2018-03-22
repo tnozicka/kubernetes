@@ -224,8 +224,10 @@ func (scaler *ReplicationControllerScaler) Scale(namespace, name string, newSize
 			}
 			return rc.Status.ObservedGeneration >= rc.Generation && rc.Status.Replicas == rc.Spec.Replicas
 		}
-		fieldSelector := fields.OneTermEqualSelector("metadata.name", name)
-		lw := cache.NewListWatchFromMethods(scaler.c.ReplicationControllers(namespace), fieldSelector)
+		listOptions := metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
+		}
+		lw := cache.NewListWatchFromMethods(scaler.c.ReplicationControllers(namespace), listOptions)
 		_, err = wtools.UntilWithInformer(
 			waitForReplicas.Timeout,
 			lw,
