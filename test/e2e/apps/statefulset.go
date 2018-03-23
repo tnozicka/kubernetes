@@ -26,11 +26,13 @@ import (
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	clientset "k8s.io/client-go/kubernetes"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/test/e2e/framework"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
@@ -571,7 +573,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 		framework.ConformanceIt("Scaling should happen in predictable order and halt if any stateful pod is unhealthy", func() {
 			psLabels := klabels.Set(labels)
 			By("Initializing watcher for selector " + psLabels.String())
-			watcher, err := f.ClientSet.CoreV1().Pods(ns).Watch(metav1.ListOptions{
+			pl, err := f.ClientSet.CoreV1().Pods(ns).List(metav1.ListOptions{
 				LabelSelector: psLabels.AsSelector().String(),
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -599,7 +601,15 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			By("Verifying that stateful set " + ssName + " was scaled up in order")
 			expectedOrder := []string{ssName + "-0", ssName + "-1", ssName + "-2"}
-			_, err = watch.Until(framework.StatefulSetTimeout, watcher, func(event watch.Event) (bool, error) {
+			watchFunc := func(sinceResourceVersion string) (watch.Interface, error) {
+				w, err := f.ClientSet.CoreV1().Pods(ns).Watch(metav1.ListOptions{
+					LabelSelector:   psLabels.AsSelector().String(),
+					ResourceVersion: sinceResourceVersion,
+				})
+				framework.ExpectNoError(err)
+				return w, err
+			}
+			_, err = watchtools.Until(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 				if event.Type != watch.Added {
 					return false, nil
 				}
@@ -613,7 +623,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Scale down will halt with unhealthy stateful pod")
-			watcher, err = f.ClientSet.CoreV1().Pods(ns).Watch(metav1.ListOptions{
+			pl, err = f.ClientSet.CoreV1().Pods(ns).List(metav1.ListOptions{
 				LabelSelector: psLabels.AsSelector().String(),
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -630,11 +640,15 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			By("Verifying that stateful set " + ssName + " was scaled down in reverse order")
 			expectedOrder = []string{ssName + "-2", ssName + "-1", ssName + "-0"}
-			_, err = watch.Until(framework.StatefulSetTimeout, watcher, func(event watch.Event) (bool, error) {
+			_, err = watchtools.Until(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+				if event.Type == watch.Error {
+					return true, fmt.Errorf("watch error: %#v", event.Object)
+				}
 				if event.Type != watch.Deleted {
 					return false, nil
 				}
 				pod := event.Object.(*v1.Pod)
+				framework.Logf("Deleted pod: %s/%s RV=%s", ns, pod.Name, pod.ResourceVersion)
 				if pod.Name == expectedOrder[0] {
 					expectedOrder = expectedOrder[1:]
 				}
@@ -734,10 +748,16 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			var initialStatefulPodUID types.UID
 			By("Waiting until stateful pod " + statefulPodName + " will be recreated and deleted at least once in namespace " + f.Namespace.Name)
-			w, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: statefulPodName}))
-			framework.ExpectNoError(err)
+			watchFunc := func(sinceResourceVersion string) (watch.Interface, error) {
+				w, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Watch(metav1.ListOptions{
+					FieldSelector:   fields.OneTermEqualSelector("metadata.name", statefulPodName).String(),
+					ResourceVersion: sinceResourceVersion,
+				})
+				framework.ExpectNoError(err)
+				return w, err
+			}
 			// we need to get UID from pod in any state and wait until stateful set controller will remove pod atleast once
-			_, err = watch.Until(framework.StatefulPodTimeout, w, func(event watch.Event) (bool, error) {
+			_, err = watchtools.Until(framework.StatefulPodTimeout, "", watchFunc, func(event watch.Event) (bool, error) {
 				pod := event.Object.(*v1.Pod)
 				switch event.Type {
 				case watch.Deleted:

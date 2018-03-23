@@ -18,11 +18,15 @@ package rollout
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -59,6 +63,7 @@ type RolloutStatusOptions struct {
 
 	Watch    bool
 	Revision int64
+	Timeout  time.Duration
 
 	StatusViewer func(*meta.RESTMapping) (kubectl.StatusViewer, error)
 	Builder      func() *resource.Builder
@@ -73,6 +78,7 @@ func NewRolloutStatusOptions(streams genericclioptions.IOStreams) *RolloutStatus
 		FilenameOptions: &resource.FilenameOptions{},
 		IOStreams:       streams,
 		Watch:           true,
+		Timeout:         0,
 	}
 }
 
@@ -90,7 +96,7 @@ func NewCmdRolloutStatus(f cmdutil.Factory, streams genericclioptions.IOStreams)
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdutil.CheckErr(o.Complete(f, args))
 			cmdutil.CheckErr(o.Validate(cmd, args))
-			cmdutil.CheckErr(o.Run())
+			cmdutil.CheckErr(o.Run(f))
 		},
 		ValidArgs: validArgs,
 	}
@@ -99,6 +105,7 @@ func NewCmdRolloutStatus(f cmdutil.Factory, streams genericclioptions.IOStreams)
 	cmdutil.AddFilenameOptionFlags(cmd, o.FilenameOptions, usage)
 	cmd.Flags().BoolVarP(&o.Watch, "watch", "w", o.Watch, "Watch the status of the rollout until it's done.")
 	cmd.Flags().Int64Var(&o.Revision, "revision", o.Revision, "Pin to a specific revision for showing its status. Defaults to 0 (last revision).")
+	cmd.Flags().DurationVar(&o.Timeout, "timeout", o.Timeout, "The length of time to wait before ending watch, zero means never. Any other values should contain a corresponding time unit (e.g. 1s, 2m, 3h).")
 
 	return cmd
 }
@@ -131,7 +138,7 @@ func (o *RolloutStatusOptions) Validate(cmd *cobra.Command, args []string) error
 	return nil
 }
 
-func (o *RolloutStatusOptions) Run() error {
+func (o *RolloutStatusOptions) Run(f cmdutil.Factory) error {
 	r := o.Builder().
 		WithScheme(scheme.Scheme, scheme.Scheme.PrioritizedVersionsAllGroups()...).
 		NamespaceParam(o.Namespace).DefaultNamespace().
@@ -159,7 +166,8 @@ func (o *RolloutStatusOptions) Run() error {
 	if err != nil {
 		return err
 	}
-	rv, err := meta.NewAccessor().ResourceVersion(obj)
+
+	restClient, err := f.ClientForMapping(mapping)
 	if err != nil {
 		return err
 	}
@@ -184,16 +192,14 @@ func (o *RolloutStatusOptions) Run() error {
 		return nil
 	}
 
-	// watch for changes to the deployment
-	w, err := r.Watch(rv)
-	if err != nil {
-		return err
-	}
+	lw := cache.NewListWatchFromClient(restClient, mapping.Resource.String(), info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
+	w := watchtools.NewInformerWatcher(lw, obj, 0)
+	defer w.Stop()
 
 	// if the rollout isn't done yet, keep watching deployment status
 	intr := interrupt.New(nil, w.Stop)
 	return intr.Run(func() error {
-		_, err := watch.Until(0, w, func(e watch.Event) (bool, error) {
+		_, err = watchtools.UntilWithoutRetry(o.Timeout, w, func(e watch.Event) (bool, error) {
 			// print deployment's status
 			status, done, err := statusViewer.Status(info.Namespace, info.Name, o.Revision)
 			if err != nil {
@@ -204,6 +210,7 @@ func (o *RolloutStatusOptions) Run() error {
 			if done {
 				return true, nil
 			}
+
 			return false, nil
 		})
 		return err

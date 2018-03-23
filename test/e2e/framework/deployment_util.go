@@ -25,11 +25,13 @@ import (
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	clientset "k8s.io/client-go/kubernetes"
 	scaleclient "k8s.io/client-go/scale"
+	watchtools "k8s.io/client-go/tools/watch"
 	appsinternal "k8s.io/kubernetes/pkg/apis/apps"
 	deploymentutil "k8s.io/kubernetes/pkg/controller/deployment/util"
 	testutils "k8s.io/kubernetes/test/utils"
@@ -145,13 +147,16 @@ func WatchRecreateDeployment(c clientset.Interface, d *apps.Deployment) error {
 		return fmt.Errorf("deployment %q does not use a Recreate strategy: %s", d.Name, d.Spec.Strategy.Type)
 	}
 
-	w, err := c.AppsV1().Deployments(d.Namespace).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: d.Name, ResourceVersion: d.ResourceVersion}))
-	if err != nil {
-		return err
+	watchFunc := func(sinceResourceVersion string) (watch.Interface, error) {
+		w, err := c.AppsV1().Deployments(d.Namespace).Watch(metav1.ListOptions{
+			FieldSelector:   fields.OneTermEqualSelector("metadata.name", d.Name).String(),
+			ResourceVersion: sinceResourceVersion,
+		})
+		ExpectNoError(err)
+		return w, err
 	}
 
 	status := d.Status
-
 	condition := func(event watch.Event) (bool, error) {
 		d := event.Object.(*apps.Deployment)
 		status = d.Status
@@ -172,7 +177,7 @@ func WatchRecreateDeployment(c clientset.Interface, d *apps.Deployment) error {
 			d.Generation <= d.Status.ObservedGeneration, nil
 	}
 
-	_, err = watch.Until(2*time.Minute, w, condition)
+	_, err := watchtools.Until(2*time.Minute, d.ResourceVersion, watchFunc, condition)
 	if err == wait.ErrWaitTimeout {
 		err = fmt.Errorf("deployment %q never completed: %#v", d.Name, status)
 	}
