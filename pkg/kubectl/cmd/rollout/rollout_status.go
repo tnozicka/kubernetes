@@ -20,16 +20,18 @@ import (
 	"fmt"
 	"io"
 
-	"k8s.io/apimachinery/pkg/api/meta"
+	"github.com/spf13/cobra"
+
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
+	wtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/util/interrupt"
-
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -71,6 +73,7 @@ func NewCmdRolloutStatus(f cmdutil.Factory, out io.Writer) *cobra.Command {
 	cmdutil.AddFilenameOptionFlags(cmd, options, usage)
 	cmd.Flags().BoolP("watch", "w", true, "Watch the status of the rollout until it's done.")
 	cmd.Flags().Int64("revision", 0, "Pin to a specific revision for showing its status. Defaults to 0 (last revision).")
+	cmd.Flags().Duration("timeout", 0, "The length of time to wait before ending watch, zero means never. Any other values should contain a corresponding time unit (e.g. 1s, 2m, 3h).")
 	return cmd
 }
 
@@ -111,7 +114,8 @@ func RunStatus(f cmdutil.Factory, cmd *cobra.Command, out io.Writer, args []stri
 	if err != nil {
 		return err
 	}
-	rv, err := meta.NewAccessor().ResourceVersion(obj)
+
+	restClient, err := f.ClientForMapping(mapping)
 	if err != nil {
 		return err
 	}
@@ -141,26 +145,28 @@ func RunStatus(f cmdutil.Factory, cmd *cobra.Command, out io.Writer, args []stri
 		return nil
 	}
 
-	// watch for changes to the deployment
-	w, err := r.Watch(rv)
-	if err != nil {
-		return err
-	}
+	lw := cache.NewListWatchFromClient(restClient, mapping.Resource, info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
+	w := wtools.NewInformerWatcher(lw, obj, 0)
+	defer w.Stop()
 
 	// if the rollout isn't done yet, keep watching deployment status
 	intr := interrupt.New(nil, w.Stop)
 	return intr.Run(func() error {
-		_, err := watch.Until(0, w, func(e watch.Event) (bool, error) {
+		timeout := cmdutil.GetFlagDuration(cmd, "timeout")
+		_, err = wtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
 			// print deployment's status
 			status, done, err := statusViewer.Status(info.Namespace, info.Name, revision)
 			if err != nil {
 				return false, err
 			}
+
 			fmt.Fprintf(out, "%s", status)
+
 			// Quit waiting if the rollout is done
 			if done {
 				return true, nil
 			}
+
 			return false, nil
 		})
 		return err

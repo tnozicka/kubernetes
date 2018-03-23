@@ -36,7 +36,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	scaleclient "k8s.io/client-go/scale"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	wtools "k8s.io/client-go/tools/watch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	apiv1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
@@ -239,10 +241,12 @@ func NewFactory(optionalClientConfig clientcmd.ClientConfig) Factory {
 
 // GetFirstPod returns a pod matching the namespace and label selector
 // and the number of all pods that match the label selector.
-func GetFirstPod(client coreclient.PodsGetter, namespace string, selector string, timeout time.Duration, sortBy func([]*v1.Pod) sort.Interface) (*api.Pod, int, error) {
-	options := metav1.ListOptions{LabelSelector: selector}
+func GetFirstPod(client coreclient.PodsGetter, namespace string, labelSelector string, timeout time.Duration, sortBy func([]*v1.Pod) sort.Interface) (*api.Pod, int, error) {
+	listOptions := metav1.ListOptions{
+		LabelSelector: labelSelector,
+	}
 
-	podList, err := client.Pods(namespace).List(options)
+	podList, err := client.Pods(namespace).List(listOptions)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -260,25 +264,23 @@ func GetFirstPod(client coreclient.PodsGetter, namespace string, selector string
 		return internalPod, len(podList.Items), nil
 	}
 
-	// Watch until we observe a pod
-	options.ResourceVersion = podList.ResourceVersion
-	w, err := client.Pods(namespace).Watch(options)
+	// Wait until we observe a pod
+	lw := cache.NewListWatchFromMethods(client.Pods(namespace), listOptions)
+	event, err := wtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(event watch.Event) (bool, error) {
+		if event.Type == watch.Added {
+			return true, nil
+		}
+		return false, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	defer w.Stop()
 
-	condition := func(event watch.Event) (bool, error) {
-		return event.Type == watch.Added || event.Type == watch.Modified, nil
-	}
-	event, err := watch.Until(timeout, w, condition)
-	if err != nil {
-		return nil, 0, err
-	}
 	pod, ok := event.Object.(*api.Pod)
 	if !ok {
 		return nil, 0, fmt.Errorf("%#v is not a pod event", event)
 	}
+
 	return pod, 1, nil
 }
 

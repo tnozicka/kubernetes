@@ -1239,7 +1239,6 @@ func TestForceApply(t *testing.T) {
 	expected := map[string]int{
 		"getOk":       7,
 		"getNotFound": 1,
-		"getList":     1,
 		"patch":       6,
 		"delete":      1,
 		"post":        1,
@@ -1278,7 +1277,6 @@ func TestForceApply(t *testing.T) {
 						}
 						return &http.Response{StatusCode: 200, Header: defaultHeader(), Body: bodyRC}, nil
 					case strings.HasSuffix(p, pathRCList) && m == "GET":
-						counts["getList"]++
 						rcObj := readUnstructuredFromFile(t, filenameRC)
 						list := &unstructured.UnstructuredList{
 							Object: map[string]interface{}{

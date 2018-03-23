@@ -25,7 +25,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	apiserverserviceaccount "k8s.io/apiserver/pkg/authentication/serviceaccount"
 	clientset "k8s.io/client-go/kubernetes"
@@ -33,6 +32,7 @@ import (
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	wtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/serviceaccount"
@@ -129,18 +129,11 @@ func (b SAControllerClientBuilder) Config(name string) (*restclient.Config, erro
 	}
 
 	var clientConfig *restclient.Config
-
-	lw := &cache.ListWatch{
-		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-			options.FieldSelector = fields.SelectorFromSet(map[string]string{api.SecretTypeField: string(v1.SecretTypeServiceAccountToken)}).String()
-			return b.CoreClient.Secrets(b.Namespace).List(options)
-		},
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			options.FieldSelector = fields.SelectorFromSet(map[string]string{api.SecretTypeField: string(v1.SecretTypeServiceAccountToken)}).String()
-			return b.CoreClient.Secrets(b.Namespace).Watch(options)
-		},
+	listOptions := metav1.ListOptions{
+		FieldSelector: fields.SelectorFromSet(map[string]string{api.SecretTypeField: string(v1.SecretTypeServiceAccountToken)}).String(),
 	}
-	_, err = cache.ListWatchUntil(30*time.Second, lw,
+	lw := cache.NewListWatchFromMethods(b.CoreClient.Secrets(b.Namespace), listOptions)
+	_, err = wtools.UntilWithInformer(30*time.Second, lw, &v1.Secret{}, 0,
 		func(event watch.Event) (bool, error) {
 			switch event.Type {
 			case watch.Deleted:

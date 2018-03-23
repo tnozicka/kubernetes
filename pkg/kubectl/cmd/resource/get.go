@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
+	wtools "k8s.io/client-go/tools/watch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
@@ -171,6 +172,7 @@ func NewCmdGet(f cmdutil.Factory, out io.Writer, errOut io.Writer) *cobra.Comman
 	cmd.Flags().BoolVar(&options.ShowKind, "show-kind", options.ShowKind, "If present, list the resource type for the requested object(s).")
 	cmd.Flags().StringSliceVarP(&options.LabelColumns, "label-columns", "L", options.LabelColumns, "Accepts a comma separated list of labels that are going to be presented as columns. Names are case-sensitive. You can also use multiple flag options like -L label1 -L label2...")
 	cmd.Flags().BoolVar(&options.Export, "export", options.Export, "If true, use 'export' for the resources.  Exported resources are stripped of cluster-specific information.")
+	cmd.Flags().Duration("timeout", 0, "The length of time to wait before ending watch, zero means never. Any other values should contain a corresponding time unit (e.g. 1s, 2m, 3h).")
 	cmdutil.AddFilenameOptionFlags(cmd, &options.FilenameOptions, "identifying the resource to get from a server.")
 	return cmd
 }
@@ -568,7 +570,15 @@ func (options *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []s
 	first := true
 	intr := interrupt.New(nil, w.Stop)
 	intr.Run(func() error {
-		_, err := watch.Until(0, w, func(e watch.Event) (bool, error) {
+		timeout := cmdutil.GetFlagDuration(cmd, "timeout")
+
+		// FIXME: Switch to an informer (wtools.UntilWithInformer)
+		// Pure WATCH will fail after some time but definitely on API timeout.
+		// This is not an easy task as the CLI arguments "watch" and "watch-only"
+		// enforce using pure WATCH even in it's description. Those need to be deprecated first.
+		// Also unit test for this function rely on the fact that it will fail when the API WATCH
+		// is closed which is what should be fixed. (Setting a short timeout could do it.)
+		_, err := wtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
 			if !isList && first {
 				// drop the initial watch event in the single resource case
 				first = false
