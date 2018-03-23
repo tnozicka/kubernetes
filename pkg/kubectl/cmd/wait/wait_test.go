@@ -189,7 +189,7 @@ func TestWaitForDeletion(t *testing.T) {
 			},
 			fakeClient: func() *dynamicfakeclient.FakeDynamicClient {
 				fakeClient := dynamicfakeclient.NewSimpleDynamicClient(scheme)
-				fakeClient.PrependReactor("get", "theresource", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+				fakeClient.PrependReactor("list", "theresource", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
 					return true, newUnstructured("group/version", "TheKind", "ns-foo", "name-foo"), nil
 				})
 				fakeClient.PrependWatchReactor("theresource", func(action clienttesting.Action) (handled bool, ret watch.Interface, err error) {
@@ -205,7 +205,7 @@ func TestWaitForDeletion(t *testing.T) {
 				if len(actions) != 2 {
 					t.Fatal(spew.Sdump(actions))
 				}
-				if !actions[0].Matches("get", "theresource") || actions[0].(clienttesting.GetAction).GetName() != "name-foo" {
+				if !actions[0].Matches("list", "theresource") || actions[0].(clienttesting.GetAction).GetName() != "name-foo" {
 					t.Error(spew.Sdump(actions))
 				}
 				if !actions[1].Matches("watch", "theresource") {

@@ -22,18 +22,21 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	watchtools "k8s.io/client-go/tools/watch"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/printers"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
+	"k8s.io/kubernetes/pkg/kubectl/scheme"
 )
 
 // WaitFlags directly reflect the information that CLI is gathering via flags.  They will be converted to Options, which
@@ -187,45 +190,28 @@ func (o *WaitOptions) RunWait() error {
 
 // IsDeleted is a condition func for waiting for something to be deleted
 func IsDeleted(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
-	endTime := time.Now().Add(o.Timeout)
-	for {
-		gottenObj, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Get(info.Name, metav1.GetOptions{})
+	gottenObj, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Get(info.Name, metav1.GetOptions{})
+	if err != nil {
 		if errors.IsNotFound(err) {
 			return info.Object, true, nil
 		}
-		if err != nil {
-			// TODO this could do something slightly fancier if we wish
-			return info.Object, false, err
-		}
 
-		watchOptions := metav1.ListOptions{}
-		watchOptions.FieldSelector = "metadata.name=" + info.Name
-		watchOptions.ResourceVersion = gottenObj.GetResourceVersion()
-		objWatch, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(watchOptions)
-		if err != nil {
-			return gottenObj, false, err
-		}
-
-		timeout := endTime.Sub(time.Now())
-		if timeout < 0 {
-			// we're out of time
-			return gottenObj, false, wait.ErrWaitTimeout
-		}
-		watchEvent, err := watch.Until(o.Timeout, objWatch, isDeleted)
-		switch {
-		case err == nil:
-			return watchEvent.Object, true, nil
-		case err == watch.ErrWatchClosed:
-			continue
-		case err == wait.ErrWaitTimeout:
-			if watchEvent != nil {
-				return watchEvent.Object, false, wait.ErrWaitTimeout
-			}
-			return gottenObj, false, wait.ErrWaitTimeout
-		default:
-			return gottenObj, false, err
-		}
+		// TODO this could do something slightly fancier if we wish
+		return info.Object, false, err
 	}
+
+	watchFunc := func(sinceResourceVersion string) (watch.Interface, error) {
+		return o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(metav1.ListOptions{
+			FieldSelector:   fields.OneTermEqualSelector("metadata.name", info.Name).String(),
+			ResourceVersion: sinceResourceVersion,
+		})
+	}
+	watchEvent, err := watchtools.Until(o.Timeout, gottenObj.GetResourceVersion(), watchFunc, isDeleted)
+	if err != nil {
+		return gottenObj, false, err
+	}
+
+	return watchEvent.Object, true, nil
 }
 
 func isDeleted(event watch.Event) (bool, error) {
@@ -240,54 +226,28 @@ type ConditionalWait struct {
 
 // IsConditionMet is a conditionfunc for waiting on an API condition to be met
 func (w ConditionalWait) IsConditionMet(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
-	endTime := time.Now().Add(o.Timeout)
-	for {
-		resourceVersion := ""
-		gottenObj, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Get(info.Name, metav1.GetOptions{})
-		switch {
-		case errors.IsNotFound(err):
-			resourceVersion = "0"
-		case err != nil:
-			return info.Object, false, err
-		default:
-			conditionMet, err := w.checkCondition(gottenObj)
-			if conditionMet {
-				return gottenObj, true, nil
-			}
-			if err != nil {
-				return gottenObj, false, err
-			}
-			resourceVersion = gottenObj.GetResourceVersion()
-		}
-
-		watchOptions := metav1.ListOptions{}
-		watchOptions.FieldSelector = "metadata.name=" + info.Name
-		watchOptions.ResourceVersion = resourceVersion
-		objWatch, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(watchOptions)
-		if err != nil {
-			return gottenObj, false, err
-		}
-
-		timeout := endTime.Sub(time.Now())
-		if timeout < 0 {
-			// we're out of time
-			return gottenObj, false, wait.ErrWaitTimeout
-		}
-		watchEvent, err := watch.Until(o.Timeout, objWatch, w.isConditionMet)
-		switch {
-		case err == nil:
-			return watchEvent.Object, true, nil
-		case err == watch.ErrWatchClosed:
-			continue
-		case err == wait.ErrWaitTimeout:
-			if watchEvent != nil {
-				return watchEvent.Object, false, wait.ErrWaitTimeout
-			}
-			return gottenObj, false, wait.ErrWaitTimeout
-		default:
-			return gottenObj, false, err
-		}
+	fieldSelector := fields.OneTermEqualSelector("metadata.name", info.Name).String()
+	lw := &cache.ListWatch{
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fieldSelector
+			return o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(options)
+		},
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fieldSelector
+			return o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(options)
+		},
 	}
+	emptyObj, err := scheme.Scheme.New(info.Mapping.GroupVersionKind)
+	if err != nil {
+		return info.Object, false, err
+	}
+
+	event, err := watchtools.UntilWithInformer(o.Timeout, lw, emptyObj, 0, w.isConditionMet)
+	if err != nil {
+		return info.Object, false, err
+	}
+
+	return event.Object, true, nil
 }
 
 func (w ConditionalWait) checkCondition(obj *unstructured.Unstructured) (bool, error) {

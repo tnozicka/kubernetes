@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/docker/distribution/reference"
 	"github.com/spf13/cobra"
@@ -29,9 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	coreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
@@ -467,7 +471,7 @@ func (o *RunOptions) removeCreatedObjects(f cmdutil.Factory, createdObjects []*R
 }
 
 // waitForPod watches the given pod until the exitCondition is true
-func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition watch.ConditionFunc) (*api.Pod, error) {
+func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition watchtools.ConditionFunc) (*api.Pod, error) {
 	w, err := podClient.Pods(ns).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: name}))
 	if err != nil {
 		return nil, err
@@ -476,7 +480,19 @@ func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition 
 	intr := interrupt.New(nil, w.Stop)
 	var result *api.Pod
 	err = intr.Run(func() error {
-		ev, err := watch.Until(0, w, func(ev watch.Event) (bool, error) {
+		fieldSelector := fields.OneTermEqualSelector("metadata.name", name).String()
+		lw := &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				options.FieldSelector = fieldSelector
+				return podClient.Pods(ns).List(options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				options.FieldSelector = fieldSelector
+				return podClient.Pods(ns).Watch(options)
+			},
+		}
+		timeout := 0 * time.Second
+		ev, err := watchtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(ev watch.Event) (bool, error) {
 			return exitCondition(ev)
 		})
 		if ev != nil {
