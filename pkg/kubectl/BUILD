@@ -183,6 +183,7 @@ go_library(
         "//vendor/k8s.io/client-go/kubernetes/typed/extensions/v1beta1:go_default_library",
         "//vendor/k8s.io/client-go/rest:go_default_library",
         "//vendor/k8s.io/client-go/scale:go_default_library",
+        "//vendor/k8s.io/client-go/tools/watch:go_default_library",
         "//vendor/k8s.io/client-go/util/integer:go_default_library",
         "//vendor/k8s.io/client-go/util/jsonpath:go_default_library",
         "//vendor/k8s.io/client-go/util/retry:go_default_library",
