@@ -18,25 +18,34 @@ package cache
 
 import (
 	"context"
-	"time"
+	"fmt"
+	"reflect"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/pager"
 )
 
-// ListerWatcher is any object that knows how to perform an initial list and start a watch on a resource.
-type ListerWatcher interface {
+// Lister is any object that knows how to perform an initial list.
+type Lister interface {
 	// List should return a list type object; the Items field will be extracted, and the
 	// ResourceVersion field will be used to start the watch in the right place.
 	List(options metav1.ListOptions) (runtime.Object, error)
+}
+
+// Watcher is any object that knows how to start a watch on a resource.
+type Watcher interface {
 	// Watch should begin a watch at the specified version.
 	Watch(options metav1.ListOptions) (watch.Interface, error)
+}
+
+// ListerWatcher is any object that knows how to perform an initial list and start a watch on a resource.
+type ListerWatcher interface {
+	Lister
+	Watcher
 }
 
 // ListFunc knows how to list resources
@@ -93,11 +102,85 @@ func NewFilteredListWatchFromClient(c Getter, resource string, namespace string,
 	return &ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
-func timeoutFromListOptions(options metav1.ListOptions) time.Duration {
-	if options.TimeoutSeconds != nil {
-		return time.Duration(*options.TimeoutSeconds) * time.Second
+// applyUserListOptions applies only those options that are allowed to be set in List and Watch for an Informer
+func applyUserListOptions(options metav1.ListOptions, to *metav1.ListOptions) {
+	/*
+	 * Can't copy:
+	 * - ResourceVersion
+	 * - Timeout
+	 * as these are used by informers internally
+	 */
+
+	to.LabelSelector = options.LabelSelector
+	to.FieldSelector = options.FieldSelector
+	to.IncludeUninitialized = options.IncludeUninitialized
+}
+
+// NewListWatchFromMethods creates a ListWatch object from a client supporting List and Watch methods.
+// Because Golang doesn't have templates/generics to allow us to accept an object implementing List+Watch interface but differing
+// in return types the client's type is erased to in interface{} and checked in runtime using reflection.
+func NewListWatchFromMethods(listerWatcher interface{}, userListOptions metav1.ListOptions) *ListWatch {
+	v := reflect.ValueOf(listerWatcher)
+	t := v.Type()
+
+	listMethod, ok := t.MethodByName("List")
+	if !ok {
+		panic(fmt.Errorf("missing 'List' method"))
 	}
-	return 0
+	// parameter #0 is a receiver
+	if listMethod.Type.NumIn() != 2 && listMethod.Type.NumOut() != 2 {
+		panic(fmt.Errorf(
+			"'List' doesn't have 1 input parameters and 2 return values but has %d inputs and %d output values",
+			listMethod.Type.NumIn(),
+			listMethod.Type.NumOut(),
+		))
+	}
+	if listMethod.Type.In(1) != reflect.TypeOf(metav1.ListOptions{}) {
+		panic(fmt.Errorf(
+			"'List' method argument must be '%#v' but it's '%#v'",
+			reflect.TypeOf(metav1.ListOptions{}).String(),
+			listMethod.Type.In(1).String(),
+		))
+	}
+
+	return &ListWatch{
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			applyUserListOptions(userListOptions, &options)
+			results := v.MethodByName("List").Call([]reflect.Value{reflect.ValueOf(options)})
+
+			var resObj runtime.Object
+			objInt := results[0].Interface()
+			if objInt != nil {
+				resObj = objInt.(runtime.Object)
+			}
+
+			var resErr error
+			errInt := results[1].Interface()
+			if errInt != nil {
+				resErr = errInt.(error)
+			}
+
+			return resObj, resErr
+		},
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			applyUserListOptions(userListOptions, &options)
+			results := v.MethodByName("Watch").Call([]reflect.Value{reflect.ValueOf(options)})
+
+			var resObj watch.Interface
+			objInt := results[0].Interface()
+			if objInt != nil {
+				resObj = objInt.(watch.Interface)
+			}
+
+			var resErr error
+			errInt := results[1].Interface()
+			if errInt != nil {
+				resErr = errInt.(error)
+			}
+
+			return resObj, resErr
+		},
+	}
 }
 
 // List a set of apiserver resources
@@ -111,77 +194,4 @@ func (lw *ListWatch) List(options metav1.ListOptions) (runtime.Object, error) {
 // Watch a set of apiserver resources
 func (lw *ListWatch) Watch(options metav1.ListOptions) (watch.Interface, error) {
 	return lw.WatchFunc(options)
-}
-
-// ListWatchUntil checks the provided conditions against the items returned by the list watcher, returning wait.ErrWaitTimeout
-// if timeout is exceeded without all conditions returning true, or an error if an error occurs.
-// TODO: check for watch expired error and retry watch from latest point?  Same issue exists for Until.
-func ListWatchUntil(timeout time.Duration, lw ListerWatcher, conditions ...watch.ConditionFunc) (*watch.Event, error) {
-	if len(conditions) == 0 {
-		return nil, nil
-	}
-
-	list, err := lw.List(metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	initialItems, err := meta.ExtractList(list)
-	if err != nil {
-		return nil, err
-	}
-
-	// use the initial items as simulated "adds"
-	var lastEvent *watch.Event
-	currIndex := 0
-	passedConditions := 0
-	for _, condition := range conditions {
-		// check the next condition against the previous event and short circuit waiting for the next watch
-		if lastEvent != nil {
-			done, err := condition(*lastEvent)
-			if err != nil {
-				return lastEvent, err
-			}
-			if done {
-				passedConditions = passedConditions + 1
-				continue
-			}
-		}
-
-	ConditionSucceeded:
-		for currIndex < len(initialItems) {
-			lastEvent = &watch.Event{Type: watch.Added, Object: initialItems[currIndex]}
-			currIndex++
-
-			done, err := condition(*lastEvent)
-			if err != nil {
-				return lastEvent, err
-			}
-			if done {
-				passedConditions = passedConditions + 1
-				break ConditionSucceeded
-			}
-		}
-	}
-	if passedConditions == len(conditions) {
-		return lastEvent, nil
-	}
-	remainingConditions := conditions[passedConditions:]
-
-	metaObj, err := meta.ListAccessor(list)
-	if err != nil {
-		return nil, err
-	}
-	currResourceVersion := metaObj.GetResourceVersion()
-
-	watchInterface, err := lw.Watch(metav1.ListOptions{ResourceVersion: currResourceVersion})
-	if err != nil {
-		return nil, err
-	}
-
-	evt, err := watch.Until(timeout, watchInterface, remainingConditions...)
-	if err == watch.ErrWatchClosed {
-		// present a consistent error interface to callers
-		err = wait.ErrWaitTimeout
-	}
-	return evt, err
 }

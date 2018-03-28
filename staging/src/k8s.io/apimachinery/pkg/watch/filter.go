@@ -83,8 +83,12 @@ var _ Interface = &Recorder{}
 // NewRecorder wraps an Interface and records any changes sent across it.
 func NewRecorder(w Interface) *Recorder {
 	r := &Recorder{}
-	r.Interface = Filter(w, r.record)
+	r.SetInterface(w)
 	return r
+}
+
+func (r *Recorder) SetInterface(w Interface) {
+	r.Interface = Filter(w, r.record)
 }
 
 // record is a FilterFunc and tracks each received event.
