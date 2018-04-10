@@ -38,7 +38,7 @@ import (
 	"k8s.io/apiserver/pkg/registry/generic"
 	externalclientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/client-go/transport"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/api/testapi"
@@ -536,7 +536,7 @@ func TestBootstrapping(t *testing.T) {
 		}
 		return w
 	}
-	_, err := wtools.UntilWithRetry(30*time.Second, "", watchFunc, func(event watch.Event) (bool, error) {
+	_, err := watchtools.UntilWithRetry(30*time.Second, "", watchFunc, func(event watch.Event) (bool, error) {
 		if event.Type != watch.Added {
 			return false, nil
 		}

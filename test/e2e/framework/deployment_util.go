@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	clientset "k8s.io/client-go/kubernetes"
 	scaleclient "k8s.io/client-go/scale"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	extensionsinternal "k8s.io/kubernetes/pkg/apis/extensions"
 	deploymentutil "k8s.io/kubernetes/pkg/controller/deployment/util"
 	testutils "k8s.io/kubernetes/test/utils"
@@ -179,7 +179,7 @@ func WatchRecreateDeployment(c clientset.Interface, d *extensions.Deployment) er
 			d.Generation <= d.Status.ObservedGeneration, nil
 	}
 
-	_, err := wtools.UntilWithRetry(2*time.Minute, d.ResourceVersion, watchFunc, condition)
+	_, err := watchtools.UntilWithRetry(2*time.Minute, d.ResourceVersion, watchFunc, condition)
 	if err == wait.ErrWaitTimeout {
 		err = fmt.Errorf("deployment %q never completed: %#v", d.Name, status)
 	}

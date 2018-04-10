@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -146,14 +146,14 @@ func RunStatus(f cmdutil.Factory, cmd *cobra.Command, out io.Writer, args []stri
 	}
 
 	lw := cache.NewListWatchFromClient(restClient, mapping.Resource, info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
-	w := wtools.NewInformerWatcher(lw, obj, 0)
+	w := watchtools.NewInformerWatcher(lw, obj, 0)
 	defer w.Stop()
 
 	// if the rollout isn't done yet, keep watching deployment status
 	intr := interrupt.New(nil, w.Stop)
 	return intr.Run(func() error {
 		timeout := cmdutil.GetFlagDuration(cmd, "timeout")
-		_, err = wtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
+		_, err = watchtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
 			// print deployment's status
 			status, done, err := statusViewer.Status(info.Namespace, info.Name, revision)
 			if err != nil {

@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	certificatesclient "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	"k8s.io/client-go/tools/cache"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	certutil "k8s.io/client-go/util/cert"
 )
 
@@ -123,7 +123,7 @@ func WaitForCertificate(client certificatesclient.CertificateSigningRequestInter
 	listOptions := metav1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", req.Name).String(),
 	}
-	event, err := wtools.UntilWithInformer(
+	event, err := watchtools.UntilWithInformer(
 		timeout,
 		cache.NewListWatchFromMethods(client, listOptions),
 		&certificates.CertificateSigningRequest{},

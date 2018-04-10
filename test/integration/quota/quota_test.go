@@ -34,7 +34,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	internalinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/internalversion"
@@ -168,7 +168,7 @@ func waitForQuota(t *testing.T, quota *v1.ResourceQuota, clientset *clientset.Cl
 		}
 		return w
 	}
-	_, err = wtools.UntilWithRetry(1*time.Minute, rq.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+	_, err = watchtools.UntilWithRetry(1*time.Minute, rq.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Modified:
 		default:
@@ -231,7 +231,7 @@ func scale(t *testing.T, namespace string, clientset *clientset.Clientset) {
 		}
 		return w
 	}
-	_, err = wtools.UntilWithRetry(3*time.Minute, rc.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+	_, err = watchtools.UntilWithRetry(3*time.Minute, rc.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Modified:
 		default:

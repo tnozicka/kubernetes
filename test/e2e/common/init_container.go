@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/watch"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/client/conditions"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -93,7 +93,7 @@ var _ = framework.KubeDescribe("InitContainer", func() {
 			wr.SetInterface(w)
 			return wr
 		}
-		event, err := wtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc, conditions.PodCompleted)
+		event, err := watchtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc, conditions.PodCompleted)
 		Expect(err).To(BeNil())
 		framework.CheckInvariants(wr.Events(), framework.ContainerInitInvariant)
 		endPod := event.Object.(*v1.Pod)
@@ -163,7 +163,7 @@ var _ = framework.KubeDescribe("InitContainer", func() {
 			wr.SetInterface(w)
 			return wr
 		}
-		event, err := wtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc, conditions.PodRunning)
+		event, err := watchtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc, conditions.PodRunning)
 		Expect(err).To(BeNil())
 		framework.CheckInvariants(wr.Events(), framework.ContainerInitInvariant)
 		endPod := event.Object.(*v1.Pod)
@@ -234,7 +234,7 @@ var _ = framework.KubeDescribe("InitContainer", func() {
 			wr.SetInterface(w)
 			return wr
 		}
-		event, err := wtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc,
+		event, err := watchtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc,
 			// check for the first container to fail at least once
 			func(evt watch.Event) (bool, error) {
 				switch t := evt.Object.(type) {
@@ -351,7 +351,7 @@ var _ = framework.KubeDescribe("InitContainer", func() {
 			wr.SetInterface(w)
 			return wr
 		}
-		event, err := wtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc,
+		event, err := watchtools.UntilWithRetry(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc,
 			// check for the second container to fail at least once
 			func(evt watch.Event) (bool, error) {
 				switch t := evt.Object.(type) {

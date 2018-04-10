@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/security/apparmor"
 	"k8s.io/kubernetes/test/e2e/framework"
 
@@ -161,7 +161,7 @@ func runAppArmorTest(f *framework.Framework, shouldRun bool, profile string) v1.
 			}
 			return w
 		}
-		_, err := wtools.UntilWithRetry(framework.PodStartTimeout, "", watchFunc, func(e watch.Event) (bool, error) {
+		_, err := watchtools.UntilWithRetry(framework.PodStartTimeout, "", watchFunc, func(e watch.Event) (bool, error) {
 			switch e.Type {
 			case watch.Deleted:
 				return false, errors.NewNotFound(schema.GroupResource{Resource: "pods"}, pod.Name)

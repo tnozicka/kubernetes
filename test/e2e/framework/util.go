@@ -73,7 +73,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
@@ -869,7 +869,7 @@ func waitForServiceAccountInNamespace(c clientset.Interface, ns, serviceAccountN
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", serviceAccountName).String(),
 	}
 	lw := cache.NewListWatchFromMethods(c.CoreV1().ServiceAccounts(ns), listOptions)
-	_, err := wtools.UntilWithInformer(timeout, lw, &v1.ServiceAccount{}, 0, conditions.ServiceAccountHasSecrets)
+	_, err := watchtools.UntilWithInformer(timeout, lw, &v1.ServiceAccount{}, 0, conditions.ServiceAccountHasSecrets)
 	return err
 }
 
@@ -1584,7 +1584,7 @@ func WaitForRCToStabilize(c clientset.Interface, ns, name string, timeout time.D
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
 	}
 	lw := cache.NewListWatchFromMethods(c.CoreV1().ReplicationControllers(ns), listOptions)
-	_, err := wtools.UntilWithInformer(timeout, lw, &v1.ReplicationController{}, 0, func(event watch.Event) (bool, error) {
+	_, err := watchtools.UntilWithInformer(timeout, lw, &v1.ReplicationController{}, 0, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Deleted:
 			return false, apierrs.NewNotFound(schema.GroupResource{Resource: "replicationcontrollers"}, "")

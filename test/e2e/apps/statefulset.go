@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	clientset "k8s.io/client-go/kubernetes"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/test/e2e/framework"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
@@ -719,7 +719,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 				}
 				return w
 			}
-			_, err = wtools.UntilWithRetry(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+			_, err = watchtools.UntilWithRetry(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 				if event.Type != watch.Added {
 					return false, nil
 				}
@@ -750,7 +750,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			By("Verifying that stateful set " + ssName + " was scaled down in reverse order")
 			expectedOrder = []string{ssName + "-2", ssName + "-1", ssName + "-0"}
-			_, err = wtools.UntilWithRetry(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+			_, err = watchtools.UntilWithRetry(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 				if event.Type == watch.Error {
 					return true, fmt.Errorf("watch error: %#v", event.Object)
 				}
@@ -870,7 +870,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 				return w
 			}
 			// we need to get UID from pod in any state and wait until stateful set controller will remove pod atleast once
-			_, err = wtools.UntilWithRetry(framework.StatefulPodTimeout, "", watchFunc, func(event watch.Event) (bool, error) {
+			_, err = watchtools.UntilWithRetry(framework.StatefulPodTimeout, "", watchFunc, func(event watch.Event) (bool, error) {
 				pod := event.Object.(*v1.Pod)
 				switch event.Type {
 				case watch.Deleted:

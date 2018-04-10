@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
@@ -572,13 +572,13 @@ func (options *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []s
 	intr.Run(func() error {
 		timeout := cmdutil.GetFlagDuration(cmd, "timeout")
 
-		// FIXME: Switch to an informer (wtools.UntilWithInformer)
+		// FIXME: Switch to an informer (watchtools.UntilWithInformer)
 		// Pure WATCH will fail after some time but definitely on API timeout.
 		// This is not an easy task as the CLI arguments "watch" and "watch-only"
 		// enforce using pure WATCH even in it's description. Those need to be deprecated first.
 		// Also unit test for this function rely on the fact that it will fail when the API WATCH
 		// is closed which is what should be fixed. (Setting a short timeout could do it.)
-		_, err := wtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
+		_, err := watchtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
 			if !isList && first {
 				// drop the initial watch event in the single resource case
 				first = false

@@ -38,7 +38,7 @@ import (
 	scaleclient "k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	apiv1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
@@ -266,7 +266,7 @@ func GetFirstPod(client coreclient.PodsGetter, namespace string, labelSelector s
 
 	// Wait until we observe a pod
 	lw := cache.NewListWatchFromMethods(client.Pods(namespace), listOptions)
-	event, err := wtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(event watch.Event) (bool, error) {
+	event, err := watchtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(event watch.Event) (bool, error) {
 		if event.Type == watch.Added {
 			return true, nil
 		}

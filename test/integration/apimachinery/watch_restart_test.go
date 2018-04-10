@@ -33,7 +33,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/test/integration/framework"
 )
@@ -170,7 +170,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 			succeed: true,
 			secret:  newTestSecret("secret-02"),
 			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
-				return wtools.NewRetryWatcher(secret.ResourceVersion, func(rv string) watch.Interface {
+				return watchtools.NewRetryWatcher(secret.ResourceVersion, func(rv string) watch.Interface {
 					options := metav1.ListOptions{
 						ResourceVersion: rv,
 					}
@@ -191,7 +191,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 						return getWatchFunc(c, secret)(options), nil
 					},
 				}
-				return wtools.NewInformerWatcher(lw, &v1.Secret{}, 15*time.Second)
+				return watchtools.NewInformerWatcher(lw, &v1.Secret{}, 15*time.Second)
 			},
 			normalizeOutputFunc: normalizeInformerOutputFunc(initialCount),
 		},
@@ -222,7 +222,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 
 			// Record current time to be able to asses if the timeout has been reached
 			startTime := time.Now()
-			_, err = wtools.UntilWithoutRetry(timeout, watcher, func(event watch.Event) (bool, error) {
+			_, err = watchtools.UntilWithoutRetry(timeout, watcher, func(event watch.Event) (bool, error) {
 				s, ok := event.Object.(*v1.Secret)
 				if !ok {
 					t.Fatalf("Received an object that is not a Secret: %#v", event.Object)

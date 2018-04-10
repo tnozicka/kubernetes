@@ -35,7 +35,7 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
-	wtools "k8s.io/client-go/tools/watch"
+	watchtools "k8s.io/client-go/tools/watch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	coreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
 	"k8s.io/kubernetes/pkg/kubectl"
@@ -487,7 +487,7 @@ func (o *RunOptions) removeCreatedObjects(f cmdutil.Factory, createdObjects []*R
 }
 
 // waitForPod watches the given pod until the exitCondition is true
-func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition wtools.ConditionFunc) (*api.Pod, error) {
+func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition watchtools.ConditionFunc) (*api.Pod, error) {
 	w, err := podClient.Pods(ns).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: name}))
 	if err != nil {
 		return nil, err
@@ -501,7 +501,7 @@ func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition 
 		}
 		lw := cache.NewListWatchFromMethods(podClient.Pods(ns), listOptions)
 		timeout := 0 * time.Second
-		ev, err := wtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(ev watch.Event) (bool, error) {
+		ev, err := watchtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(ev watch.Event) (bool, error) {
 			return exitCondition(ev)
 		})
 		if ev != nil {
