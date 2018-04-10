@@ -24,7 +24,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewInformerWatcher will IndexedInformer and wrap it into watch Interface
+// NewInformerWatcher will create an IndexedInformer and wrap it into watch.Interface
 // so you can use it anywhere normal watcher from Watch method could be used.
 func NewInformerWatcher(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration) watch.Interface {
 	ch := make(chan watch.Event)

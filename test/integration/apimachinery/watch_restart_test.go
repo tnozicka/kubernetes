@@ -150,12 +150,14 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 	}
 
 	tt := []struct {
+		name                string
 		succeed             bool
 		secret              *v1.Secret
 		getWatcher          func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface
 		normalizeOutputFunc func(referenceOutput []string) []string
 	}{
 		{
+			name:    "regular watcher should fail",
 			succeed: false,
 			secret:  newTestSecret("secret-01"),
 			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
@@ -167,6 +169,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 			normalizeOutputFunc: noopNormalization,
 		},
 		{
+			name:    "RetryWatcher survives closed watches",
 			succeed: true,
 			secret:  newTestSecret("secret-02"),
 			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
@@ -180,6 +183,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 			normalizeOutputFunc: noopNormalization,
 		},
 		{
+			name:    "InformerWatcher survives closed watches",
 			succeed: true,
 			secret:  newTestSecret("secret-03"),
 			getWatcher: func(c *kubernetes.Clientset, secret *v1.Secret) watch.Interface {
@@ -199,7 +203,7 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 
 	for _, tmptc := range tt {
 		tc := tmptc // we need to copy it for parallel runs
-		t.Run("", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			// TODO: enable parallel run because these test take long
 			//t.Parallel() // There is something wrong with the server this way - says: "getsockopt: connection refused"
 

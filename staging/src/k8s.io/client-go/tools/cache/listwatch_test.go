@@ -26,25 +26,29 @@ import (
 
 func TestNewListWatchFromMethods(t *testing.T) {
 	tt := []struct {
+		name    string
 		succeed bool
 		obj     interface{}
 	}{
 		{
+			name:    "nil object panics",
 			succeed: false,
 			obj:     nil,
 		},
 		{
+			name:    "random object panics",
 			succeed: false,
 			obj:     clientsetfake.NewSimpleClientset().CoreV1(),
 		},
 		{
+			name:    "ListerWatcher succeeds",
 			succeed: true,
 			obj:     clientsetfake.NewSimpleClientset().CoreV1().ReplicationControllers(""),
 		},
 	}
 
 	for _, tc := range tt {
-		t.Run("", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			r := func() (i interface{}) {
 				defer func() { i = recover() }()
 

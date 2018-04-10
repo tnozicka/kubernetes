@@ -43,7 +43,7 @@ var ErrWatchClosed = errors.New("watch closed before UntilWithoutRetry timeout")
 //
 // Warning: Unless you have a very specific use case (probably a special Watcher) don't use this function!!!
 // Warning: This will fail e.g. on API timeouts and/or 'too old resource version' error.
-// Warning: You are most probably looking for a function *UntilWithRetry* or *UntilWithInformer* bellow,
+// Warning: You are most probably looking for a function *UntilWithRetry* or *UntilWithInformer* below,
 // Warning: solving such issues.
 func UntilWithoutRetry(timeout time.Duration, watcher watch.Interface, conditions ...ConditionFunc) (*watch.Event, error) {
 	ch := watcher.ResultChan()

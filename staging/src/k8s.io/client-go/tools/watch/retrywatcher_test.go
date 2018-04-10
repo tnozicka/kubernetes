@@ -115,6 +115,7 @@ func TestRetryWatcher(t *testing.T) {
 	flag.Set("v", "9")
 
 	tt := []struct {
+		name        string
 		initialRV   string
 		watcherFunc WatcherFunc
 		watchCount  uint32
@@ -122,6 +123,7 @@ func TestRetryWatcher(t *testing.T) {
 		err         error
 	}{
 		{
+			name: "fails with nil watcher",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return nil
 			},
@@ -130,6 +132,7 @@ func TestRetryWatcher(t *testing.T) {
 			err:        RetryWatcherError{"RetryWatcher failed: watcherFunc returned nil watcher!"},
 		},
 		{
+			name:      "works with empty initialRV",
 			initialRV: "",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -143,6 +146,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "works with initialRV set, skipping the preceding items but reading those directly following",
 			initialRV: "1",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -157,6 +161,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "works with initialRV set, skipping the preceding items with none following",
 			initialRV: "3",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -168,6 +173,7 @@ func TestRetryWatcher(t *testing.T) {
 			err:        nil,
 		},
 		{
+			name:      "fails on RetryWatcherError",
 			initialRV: "3",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -182,6 +188,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: RetryWatcherError{"error"},
 		},
 		{
+			name:      "fails on RetryWatcherError, without reading following events",
 			initialRV: "5",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -199,6 +206,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: RetryWatcherError{"error"},
 		},
 		{
+			name:      "survives 1 closed watch and reads 1 item",
 			initialRV: "5",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(1, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -212,6 +220,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "survives 2 closed watches and reads 2 items",
 			initialRV: "4",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(1, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -227,6 +236,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "survives 2 closed watches and reads 2 items for nonconsecutive RVs",
 			initialRV: "4",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(1, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -242,6 +252,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "survives 2 closed watches and reads 2 items for nonconsecutive RVs starting at much lower RV",
 			initialRV: "2",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(1, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -257,6 +268,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "survives 4 closed watches and reads 4 items for nonconsecutive, spread RVs",
 			initialRV: "2",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(1, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -276,6 +288,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "survives 4 closed watches and reads 4 items for nonconsecutive, spread RVs and skips those with lower or equal RV",
 			initialRV: "2",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(1, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -297,6 +310,7 @@ func TestRetryWatcher(t *testing.T) {
 			err: nil,
 		},
 		{
+			name:      "survives 2 closed watches and reads 2+2+1 items skipping those with equal RV",
 			initialRV: "1",
 			watcherFunc: func(sinceResourceVersion string) watch.Interface {
 				return watch.NewProxyWatcher(closeAfterN(2, arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
@@ -321,7 +335,7 @@ func TestRetryWatcher(t *testing.T) {
 	}
 
 	for _, tc := range tt {
-		t.Run("", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			counter, watchFunc := withCounter(tc.watcherFunc)
 			watcher := NewRetryWatcher(tc.initialRV, watchFunc)
 

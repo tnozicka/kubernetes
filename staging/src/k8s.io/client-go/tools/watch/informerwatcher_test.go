@@ -52,10 +52,12 @@ func (a byEventTypeAndName) Less(i, j int) bool {
 func TestNewInformerWatcher(t *testing.T) {
 	// Make sure there are no 2 same types of events on a secret with the same name or that might be flaky.
 	tt := []struct {
+		name    string
 		objects []runtime.Object
 		events  []watch.Event
 	}{
 		{
+			name: "basic test",
 			objects: []runtime.Object{
 				&corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
@@ -118,7 +120,7 @@ func TestNewInformerWatcher(t *testing.T) {
 	}
 
 	for _, tc := range tt {
-		t.Run("", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var expected []watch.Event
 			for _, o := range tc.objects {
 				expected = append(expected, watch.Event{

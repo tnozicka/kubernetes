@@ -183,7 +183,7 @@ func NewListWatchFromMethods(listerWatcher interface{}, userListOptions metav1.L
 	}
 }
 
-// List a set of apiserver resources
+// List lists a set of apiserver resources
 func (lw *ListWatch) List(options metav1.ListOptions) (runtime.Object, error) {
 	if !lw.DisableChunking {
 		return pager.New(pager.SimplePageFunc(lw.ListFunc)).List(context.TODO(), options)
@@ -191,7 +191,7 @@ func (lw *ListWatch) List(options metav1.ListOptions) (runtime.Object, error) {
 	return lw.ListFunc(options)
 }
 
-// Watch a set of apiserver resources
+// Watch watches a set of apiserver resources
 func (lw *ListWatch) Watch(options metav1.ListOptions) (watch.Interface, error) {
 	return lw.WatchFunc(options)
 }

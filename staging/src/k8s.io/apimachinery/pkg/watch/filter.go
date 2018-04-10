@@ -87,6 +87,9 @@ func NewRecorder(w Interface) *Recorder {
 	return r
 }
 
+// SetInterface sets the interface for the Recorder.
+// Allows setting the Interface after the Recorder is created but before it'd be used.
+// Not thread safe.
 func (r *Recorder) SetInterface(w Interface) {
 	r.Interface = Filter(w, r.record)
 }

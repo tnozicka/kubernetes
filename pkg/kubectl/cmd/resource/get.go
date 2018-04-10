@@ -575,7 +575,7 @@ func (options *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []s
 		// FIXME: Switch to an informer (watchtools.UntilWithInformer)
 		// Pure WATCH will fail after some time but definitely on API timeout.
 		// This is not an easy task as the CLI arguments "watch" and "watch-only"
-		// enforce using pure WATCH even in it's description. Those need to be deprecated first.
+		// enforce using pure WATCH even in its description. Those need to be deprecated first.
 		// Also unit test for this function rely on the fact that it will fail when the API WATCH
 		// is closed which is what should be fixed. (Setting a short timeout could do it.)
 		_, err := watchtools.UntilWithoutRetry(timeout, w, func(e watch.Event) (bool, error) {
