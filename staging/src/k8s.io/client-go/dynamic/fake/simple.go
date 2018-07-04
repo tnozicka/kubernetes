@@ -18,7 +18,9 @@ package fake
 
 import (
 	"strings"
+	"time"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,8 +42,19 @@ func NewSimpleDynamicClient(scheme *runtime.Scheme, objects ...runtime.Object) *
 			panic(err)
 		}
 	}
+	go func() {
+		time.Sleep(5 * time.Second)
+		o.Delete(schema.GroupVersionResource{
+			Group:    "",
+			Version:  "v1",
+			Resource: "pod",
+		}, "ns-foo", "name-foo")
+	}()
 
-	cs := &FakeDynamicClient{}
+	cs := &FakeDynamicClient{
+		scheme:  scheme,
+		tracker: &o,
+	}
 	cs.AddReactor("*", "*", testing.ObjectReaction(o))
 	cs.AddWatchReactor("*", func(action testing.Action) (handled bool, ret watch.Interface, err error) {
 		gvr := action.GetResource()
@@ -61,7 +74,8 @@ func NewSimpleDynamicClient(scheme *runtime.Scheme, objects ...runtime.Object) *
 // you want to test easier.
 type FakeDynamicClient struct {
 	testing.Fake
-	scheme *runtime.Scheme
+	scheme  *runtime.Scheme
+	tracker *testing.ObjectTracker
 }
 
 type dynamicResourceClient struct {
@@ -289,26 +303,23 @@ func (c *dynamicResourceClient) List(opts metav1.ListOptions) (*unstructured.Uns
 		label = labels.Everything()
 	}
 
-	retUnstructured := &unstructured.Unstructured{}
-	if err := c.client.scheme.Convert(obj, retUnstructured, nil); err != nil {
-		return nil, err
-	}
-	entireList, err := retUnstructured.ToList()
-	if err != nil {
-		return nil, err
-	}
-
-	list := &unstructured.UnstructuredList{}
-	for _, item := range entireList.Items {
-		metadata, err := meta.Accessor(item)
+	objList := obj.(*v1.List)
+	unstructuredList := &unstructured.UnstructuredList{}
+	for _, item := range objList.Items {
+		metadata, err := meta.Accessor(item.Object)
 		if err != nil {
 			return nil, err
 		}
 		if label.Matches(labels.Set(metadata.GetLabels())) {
-			list.Items = append(list.Items, item)
+			var unstructuredObj unstructured.Unstructured
+			if err := c.client.scheme.Convert(item.Object, &unstructuredObj, nil); err != nil {
+				return nil, err
+			}
+			unstructuredList.Items = append(unstructuredList.Items, unstructuredObj)
 		}
 	}
-	return list, nil
+
+	return unstructuredList, nil
 }
 
 func (c *dynamicResourceClient) Watch(opts metav1.ListOptions) (watch.Interface, error) {

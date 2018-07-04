@@ -17,7 +17,9 @@ limitations under the License.
 package watch
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -25,6 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
+
+type PreconditionFunc func(store cache.Store) (bool, error)
 
 // ConditionFunc returns true if the condition has been reached, false if it has not been reached yet,
 // or an error if the condition cannot be checked and should terminate. In general, it is better to define
@@ -111,6 +115,32 @@ func Until(timeout time.Duration, initialResourceVersion string, watcherFunc Wat
 // On the other hand it can't provide you with guarantees as strong as Until. It can miss some events
 // in case of watch function failing but it will re-list to recover.
 // The most frequent usage would be a command that needs to watch the "state of the world" and should't fail. ("small" controllers)
-func UntilWithInformer(timeout time.Duration, lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration, conditions ...ConditionFunc) (*watch.Event, error) {
-	return UntilWithoutRetry(timeout, NewInformerWatcher(lw, objType, resyncPeriod), conditions...)
+func UntilWithInformer(timeout time.Duration, lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration, precondition PreconditionFunc, conditions ...ConditionFunc) (*watch.Event, error) {
+	indexer, informer, watcher := NewIndexerInformerWatcher(lw, objType, resyncPeriod)
+	// Proxy watcher can be stopped multiple times so it's fine to use defer here to cover alternative branches and
+	// let UntilWithoutRetry to stop it
+	defer watcher.Stop()
+
+	if precondition != nil {
+		ctx, ctxCancel := context.WithTimeout(context.Background(), timeout)
+		defer ctxCancel()
+
+		go func() {
+			<-ctx.Done()
+		}()
+		if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+			return nil, fmt.Errorf("UntilWithInformer: unable to sync caches: %v", ctx.Err())
+		}
+
+		done, err := precondition(indexer)
+		if err != nil {
+			return nil, err
+		}
+
+		if done {
+			return nil, nil
+		}
+	}
+
+	return UntilWithoutRetry(timeout, watcher, conditions...)
 }

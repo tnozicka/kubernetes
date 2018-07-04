@@ -17,6 +17,8 @@ limitations under the License.
 package watch
 
 import (
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,37 +26,83 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+func newTicketer() *ticketer {
+	return &ticketer{
+		cond: sync.NewCond(&sync.Mutex{}),
+	}
+}
+
+type ticketer struct {
+	counter      uint64
+	counterMutex sync.Mutex
+
+	cond    *sync.Cond
+	current uint64
+}
+
+func (t *ticketer) GetTicket() uint64 {
+	return atomic.AddUint64(&t.counter, 1)
+}
+
+func (t *ticketer) WaitForTicket(ticket uint64, f func()) {
+	t.cond.L.Lock()
+	defer t.cond.L.Unlock()
+	for ticket == t.current {
+		t.cond.Wait()
+	}
+
+	f()
+
+	t.current++
+	t.cond.Broadcast()
+}
+
 // NewInformerWatcher will create an IndexedInformer and wrap it into watch.Interface
 // so you can use it anywhere where you'd have used a regular Watcher returned from Watch method.
-func NewInformerWatcher(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration) watch.Interface {
+func NewIndexerInformerWatcher(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration) (cache.Indexer, cache.Controller, watch.Interface) {
 	ch := make(chan watch.Event)
 	w := watch.NewProxyWatcher(ch)
+	t := newTicketer()
 
-	_, informer := cache.NewIndexerInformer(lw, objType, resyncPeriod, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(lw, objType, resyncPeriod, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			ch <- watch.Event{
-				Type:   watch.Added,
-				Object: obj.(runtime.Object),
-			}
+			go t.WaitForTicket(t.GetTicket(), func() {
+				select {
+				case ch <- watch.Event{
+					Type:   watch.Added,
+					Object: obj.(runtime.Object),
+				}:
+				case <-w.StopChan():
+				}
+			})
 		},
 		UpdateFunc: func(old, new interface{}) {
-			ch <- watch.Event{
-				Type:   watch.Modified,
-				Object: new.(runtime.Object),
-			}
+			go t.WaitForTicket(t.GetTicket(), func() {
+				select {
+				case ch <- watch.Event{
+					Type:   watch.Modified,
+					Object: new.(runtime.Object),
+				}:
+				case <-w.StopChan():
+				}
+			})
 		},
 		DeleteFunc: func(obj interface{}) {
-			ch <- watch.Event{
-				Type:   watch.Deleted,
-				Object: obj.(runtime.Object),
-			}
+			go t.WaitForTicket(t.GetTicket(), func() {
+				select {
+				case ch <- watch.Event{
+					Type:   watch.Deleted,
+					Object: obj.(runtime.Object),
+				}:
+				case <-w.StopChan():
+				}
+			})
 		},
 	}, cache.Indexers{})
 
 	go func() {
 		informer.Run(w.StopChan())
-		close(ch)
 	}()
 
-	return w
+	return indexer, informer, w
 }

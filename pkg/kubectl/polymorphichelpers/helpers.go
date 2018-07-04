@@ -78,7 +78,7 @@ func GetFirstPod(client coreclient.PodsGetter, namespace string, labelSelector s
 			return client.Pods(namespace).Watch(options)
 		},
 	}
-	event, err := watchtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(event watch.Event) (bool, error) {
+	event, err := watchtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, nil, func(event watch.Event) (bool, error) {
 		if event.Type == watch.Added {
 			return true, nil
 		}
