@@ -214,7 +214,7 @@ func InformerWait(info *resource.Info, o *WaitOptions, precondition watchtools.P
 // IsDeleted is a condition func for waiting for something to be deleted
 func IsDeleted(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
 	preconditionFunc := func(store cache.Store) (bool, error) {
-		_, exists, err := store.GetByKey(fmt.Sprintf("%s/%s", info.Namespace, info.Name))
+		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: info.Namespace, Name: info.Name})
 		if err != nil {
 			return true, err
 		}
