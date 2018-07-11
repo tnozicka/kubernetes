@@ -17,6 +17,7 @@ limitations under the License.
 package common
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -93,7 +94,8 @@ var _ = framework.KubeDescribe("InitContainer [NodeConformance]", func() {
 
 			return wr, err
 		}
-		event, err := watchtools.Until(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc, conditions.PodCompleted)
+		ctx, _ := context.WithTimeout(context.Background(), framework.PodStartTimeout)
+		event, err := watchtools.Until(ctx, startedPod.ResourceVersion, watchFunc, conditions.PodCompleted)
 		Expect(err).To(BeNil())
 		framework.CheckInvariants(wr.Events(), framework.ContainerInitInvariant)
 		endPod := event.Object.(*v1.Pod)
@@ -163,7 +165,8 @@ var _ = framework.KubeDescribe("InitContainer [NodeConformance]", func() {
 
 			return wr, err
 		}
-		event, err := watchtools.Until(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc, conditions.PodRunning)
+		ctx, _ := context.WithTimeout(context.Background(), framework.PodStartTimeout)
+		event, err := watchtools.Until(ctx, startedPod.ResourceVersion, watchFunc, conditions.PodRunning)
 		Expect(err).To(BeNil())
 		framework.CheckInvariants(wr.Events(), framework.ContainerInitInvariant)
 		endPod := event.Object.(*v1.Pod)
@@ -234,7 +237,8 @@ var _ = framework.KubeDescribe("InitContainer [NodeConformance]", func() {
 
 			return wr, err
 		}
-		event, err := watchtools.Until(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc,
+		ctx, _ := context.WithTimeout(context.Background(), framework.PodStartTimeout)
+		event, err := watchtools.Until(ctx, startedPod.ResourceVersion, watchFunc,
 			// check for the first container to fail at least once
 			func(evt watch.Event) (bool, error) {
 				switch t := evt.Object.(type) {
@@ -351,7 +355,8 @@ var _ = framework.KubeDescribe("InitContainer [NodeConformance]", func() {
 
 			return wr, err
 		}
-		event, err := watchtools.Until(framework.PodStartTimeout, startedPod.ResourceVersion, watchFunc,
+		ctx, _ := context.WithTimeout(context.Background(), framework.PodStartTimeout)
+		event, err := watchtools.Until(ctx, startedPod.ResourceVersion, watchFunc,
 			// check for the second container to fail at least once
 			func(evt watch.Event) (bool, error) {
 				switch t := evt.Object.(type) {

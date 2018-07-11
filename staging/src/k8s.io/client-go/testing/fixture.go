@@ -191,6 +191,8 @@ func (t *tracker) List(gvr schema.GroupVersionResource, gvk schema.GroupVersionK
 	// not always be true but this tracker has a pretty limited
 	// understanding of the actual API model.
 	listGVK := gvk
+	listGVK.Kind = listGVK.Kind + "List"
+
 	// GVK does have the concept of "internal version". The scheme recognizes
 	// the runtime.APIVersionInternal, but not the empty string.
 	if listGVK.Version == "" {

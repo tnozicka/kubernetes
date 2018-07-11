@@ -17,6 +17,7 @@ limitations under the License.
 package get
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -572,7 +573,8 @@ func (o *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []string)
 		// enforce using pure WATCH even in its description. Those need to be deprecated first.
 		// Also unit test for this function rely on the fact that it will fail when the API WATCH
 		// is closed which is what should be fixed. (Setting a short timeout could do it.)
-		_, err := watchtools.UntilWithoutRetry(o.Timeout, w, func(e watch.Event) (bool, error) {
+		ctx, _ := context.WithTimeout(context.Background(), o.Timeout)
+		_, err := watchtools.UntilWithoutRetry(ctx, w, func(e watch.Event) (bool, error) {
 			if !isList && first {
 				// drop the initial watch event in the single resource case
 				first = false

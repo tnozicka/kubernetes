@@ -17,6 +17,7 @@ limitations under the License.
 package framework
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -177,7 +178,8 @@ func WatchRecreateDeployment(c clientset.Interface, d *apps.Deployment) error {
 			d.Generation <= d.Status.ObservedGeneration, nil
 	}
 
-	_, err := watchtools.Until(2*time.Minute, d.ResourceVersion, watchFunc, condition)
+	ctx, _ := context.WithTimeout(context.Background(), 2*time.Minute)
+	_, err := watchtools.Until(ctx, d.ResourceVersion, watchFunc, condition)
 	if err == wait.ErrWaitTimeout {
 		err = fmt.Errorf("deployment %q never completed: %#v", d.Name, status)
 	}

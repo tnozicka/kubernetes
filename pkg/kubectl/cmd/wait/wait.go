@@ -17,6 +17,7 @@ limitations under the License.
 package wait
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -169,10 +170,12 @@ type ConditionFunc func(info *resource.Info, o *WaitOptions) (finalObject runtim
 
 // RunWait runs the waiting logic
 func (o *WaitOptions) RunWait() error {
+	// TODO: remove this unnecessary GET call, informers now take care about it all
 	return o.ResourceFinder.Do().Visit(func(info *resource.Info, err error) error {
 		if err != nil {
 			return err
 		}
+		fmt.Println("running cond---")
 		finalObject, success, err := o.ConditionFn(info, o)
 		if success {
 			o.Printer.PrintObj(finalObject, o.Out)
@@ -199,7 +202,9 @@ func InformerWait(info *resource.Info, o *WaitOptions, precondition watchtools.P
 		},
 	}
 
-	event, err := watchtools.UntilWithInformer(o.Timeout, lw, &unstructured.Unstructured{}, 0, precondition, condition)
+	fmt.Printf("o.Timeout: %v", o.Timeout)
+	ctx, _ := context.WithTimeout(context.Background(), o.Timeout)
+	event, err := watchtools.UntilWithInformer(ctx, lw, &unstructured.Unstructured{}, 0, precondition, condition)
 	if err != nil {
 		return info.Object, false, err
 	}
@@ -213,7 +218,9 @@ func InformerWait(info *resource.Info, o *WaitOptions, precondition watchtools.P
 
 // IsDeleted is a condition func for waiting for something to be deleted
 func IsDeleted(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
+	fmt.Println("is deleted...")
 	preconditionFunc := func(store cache.Store) (bool, error) {
+		fmt.Println("precondition is here")
 		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: info.Namespace, Name: info.Name})
 		if err != nil {
 			return true, err

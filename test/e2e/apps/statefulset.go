@@ -17,6 +17,7 @@ limitations under the License.
 package apps
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -710,7 +711,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 				framework.ExpectNoError(err)
 				return w, err
 			}
-			_, err = watchtools.Until(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+			ctx, _ := context.WithTimeout(context.Background(), framework.StatefulSetTimeout)
+			_, err = watchtools.Until(ctx, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 				if event.Type != watch.Added {
 					return false, nil
 				}
@@ -741,7 +743,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			By("Verifying that stateful set " + ssName + " was scaled down in reverse order")
 			expectedOrder = []string{ssName + "-2", ssName + "-1", ssName + "-0"}
-			_, err = watchtools.Until(framework.StatefulSetTimeout, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+			ctx, _ = context.WithTimeout(context.Background(), framework.StatefulSetTimeout)
+			_, err = watchtools.Until(ctx, pl.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 				if event.Type == watch.Error {
 					return true, fmt.Errorf("watch error: %#v", event.Object)
 				}
@@ -858,7 +861,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 				return w, err
 			}
 			// we need to get UID from pod in any state and wait until stateful set controller will remove pod atleast once
-			_, err = watchtools.Until(framework.StatefulPodTimeout, "", watchFunc, func(event watch.Event) (bool, error) {
+			ctx, _ := context.WithTimeout(context.Background(), framework.StatefulPodTimeout)
+			_, err = watchtools.Until(ctx, "", watchFunc, func(event watch.Event) (bool, error) {
 				pod := event.Object.(*v1.Pod)
 				switch event.Type {
 				case watch.Deleted:

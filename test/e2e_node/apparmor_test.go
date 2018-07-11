@@ -18,6 +18,7 @@ package e2e_node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -159,7 +160,8 @@ func runAppArmorTest(f *framework.Framework, shouldRun bool, profile string) v1.
 			framework.ExpectNoError(err)
 			return w, err
 		}
-		_, err := watchtools.Until(framework.PodStartTimeout, "", watchFunc, func(e watch.Event) (bool, error) {
+		ctx, _ := context.WithTimeout(context.Background(), framework.PodStartTimeout)
+		_, err := watchtools.Until(ctx, "", watchFunc, func(e watch.Event) (bool, error) {
 			switch e.Type {
 			case watch.Deleted:
 				return false, errors.NewNotFound(schema.GroupResource{Resource: "pods"}, pod.Name)

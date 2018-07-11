@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -143,7 +144,8 @@ func (b SAControllerClientBuilder) Config(name string) (*restclient.Config, erro
 			return b.CoreClient.Secrets(b.Namespace).Watch(options)
 		},
 	}
-	_, err = watchtools.UntilWithInformer(30*time.Second, lw, &v1.Secret{}, 0, nil,
+	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	_, err = watchtools.UntilWithInformer(ctx, lw, &v1.Secret{}, 0, nil,
 		func(event watch.Event) (bool, error) {
 			switch event.Type {
 			case watch.Deleted:

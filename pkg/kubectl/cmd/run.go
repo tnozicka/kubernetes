@@ -17,6 +17,7 @@ limitations under the License.
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -472,14 +473,27 @@ func (o *RunOptions) removeCreatedObjects(f cmdutil.Factory, createdObjects []*R
 
 // waitForPod watches the given pod until the exitCondition is true
 func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition watchtools.ConditionFunc) (*api.Pod, error) {
-	w, err := podClient.Pods(ns).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: name}))
-	if err != nil {
-		return nil, err
+	timeout := 0 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	intr := interrupt.New(nil, cancel)
+
+	preconditionFunc := func(store cache.Store) (bool, error) {
+		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: ns, Name: name})
+		if err != nil {
+			return true, err
+		}
+		if !exists {
+			// We need to make sure we see the object in the cache before we start waiting for events
+			// or we would be waiting for the timeout if such object didn't exist.
+			// (e.g. it was deleted before we started informers so they wouldn't even see the delete event)
+			return true, errors.NewNotFound(api.Resource("pods"), name)
+		}
+
+		return false, nil
 	}
 
-	intr := interrupt.New(nil, w.Stop)
 	var result *api.Pod
-	err = intr.Run(func() error {
+	err := intr.Run(func() error {
 		fieldSelector := fields.OneTermEqualSelector("metadata.name", name).String()
 		lw := &cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
@@ -491,8 +505,7 @@ func waitForPod(podClient coreclient.PodsGetter, ns, name string, exitCondition 
 				return podClient.Pods(ns).Watch(options)
 			},
 		}
-		timeout := 0 * time.Second
-		ev, err := watchtools.UntilWithInformer(timeout, lw, &api.Pod{}, 0, func(ev watch.Event) (bool, error) {
+		ev, err := watchtools.UntilWithInformer(ctx, lw, &api.Pod{}, 0, preconditionFunc, func(ev watch.Event) (bool, error) {
 			return exitCondition(ev)
 		})
 		if ev != nil {

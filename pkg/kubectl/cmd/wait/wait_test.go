@@ -140,7 +140,7 @@ func TestWaitForDeletion(t *testing.T) {
 			o := &WaitOptions{
 				ResourceFinder: genericclioptions.NewSimpleFakeResourceFinder(info),
 				DynamicClient:  fakeClient,
-				Timeout:        test.timeout,
+				Timeout:        test.timeout * 10000,
 
 				Printer:     printers.NewDiscardingPrinter(),
 				ConditionFn: IsDeleted,
