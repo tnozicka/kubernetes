@@ -212,6 +212,11 @@ func (o *WaitOptions) RunWait() error {
 
 // IsDeleted is a condition func for waiting for something to be deleted
 func IsDeleted(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
+	xobj, xerr := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(metav1.ListOptions{})
+	if xerr != nil {
+		return xobj, false, xerr
+	}
+
 	endTime := time.Now().Add(o.Timeout)
 	for {
 		gottenObj, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Get(info.Name, metav1.GetOptions{})
