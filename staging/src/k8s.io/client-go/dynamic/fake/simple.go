@@ -276,7 +276,7 @@ func (c *dynamicResourceClient) List(opts metav1.ListOptions) (*unstructured.Uns
 
 	case len(c.namespace) > 0:
 		obj, err = c.client.Fake.
-			Invokes(testing.NewListAction(c.resource, schema.GroupVersionKind{Version: "v1", Kind: "List"}, c.namespace, opts), &metav1.Status{Status: "dynamic list fail"})
+			Invokes(testing.NewListAction(c.resource, schema.GroupVersionKind{Version: "unstructured", Kind: "Unstructured"}, c.namespace, opts), &metav1.Status{Status: "dynamic list fail"})
 
 	}
 
