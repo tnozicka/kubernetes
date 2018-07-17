@@ -871,7 +871,10 @@ func waitForServiceAccountInNamespace(c clientset.Interface, ns, serviceAccountN
 			return c.CoreV1().ServiceAccounts(ns).Watch(options)
 		},
 	}
-	_, err := watchtools.UntilWithInformer(timeout, lw, &v1.ServiceAccount{}, 0, conditions.ServiceAccountHasSecrets)
+
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), timeout)
+	defer cancel()
+	_, err := watchtools.UntilWithInformer(ctx, lw, &v1.ServiceAccount{}, 0, nil, conditions.ServiceAccountHasSecrets)
 	return err
 }
 
@@ -1590,10 +1593,28 @@ func WaitForRCToStabilize(c clientset.Interface, ns, name string, timeout time.D
 			return c.CoreV1().ReplicationControllers(ns).Watch(options)
 		},
 	}
-	_, err := watchtools.UntilWithInformer(timeout, lw, &v1.ReplicationController{}, 0, func(event watch.Event) (bool, error) {
+
+	preconditionFunc := func(store cache.Store) (bool, error) {
+		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: ns, Name: name})
+		if err != nil {
+			return true, err
+		}
+		if !exists {
+			// We need to make sure we see the object in the cache before we start waiting for events
+			// or we would be waiting for the timeout if such object didn't exist.
+			// (e.g. it was deleted before we started informers so they wouldn't even see the delete event)
+			return true, apierrs.NewNotFound(schema.GroupResource{Resource: "replicationcontrollers"}, name)
+		}
+
+		return false, nil
+	}
+
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), timeout)
+	defer cancel()
+	_, err := watchtools.UntilWithInformer(ctx, lw, &v1.ReplicationController{}, 0, preconditionFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Deleted:
-			return false, apierrs.NewNotFound(schema.GroupResource{Resource: "replicationcontrollers"}, "")
+			return false, apierrs.NewNotFound(schema.GroupResource{Resource: "replicationcontrollers"}, name)
 		}
 		switch rc := event.Object.(type) {
 		case *v1.ReplicationController:

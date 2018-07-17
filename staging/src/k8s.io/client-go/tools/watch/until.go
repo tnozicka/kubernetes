@@ -17,14 +17,21 @@ limitations under the License.
 package watch
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
+
+// PreconditionFunc returns true if the condition has been reached, false if it has not been reached yet,
+// or an error if the condition failed or detected an error state.
+type PreconditionFunc func(store cache.Store) (bool, error)
 
 // ConditionFunc returns true if the condition has been reached, false if it has not been reached yet,
 // or an error if the condition cannot be checked and should terminate. In general, it is better to define
@@ -46,17 +53,9 @@ var ErrWatchClosed = errors.New("watch closed before UntilWithoutRetry timeout")
 // Warning: You are most probably looking for a function *Until* or *UntilWithInformer* below,
 // Warning: solving such issues.
 // TODO: Consider making this function private to prevent misuse when the other occurrences in our codebase are gone.
-func UntilWithoutRetry(timeout time.Duration, watcher watch.Interface, conditions ...ConditionFunc) (*watch.Event, error) {
+func UntilWithoutRetry(ctx context.Context, watcher watch.Interface, conditions ...ConditionFunc) (*watch.Event, error) {
 	ch := watcher.ResultChan()
 	defer watcher.Stop()
-	var after <-chan time.Time
-	if timeout > 0 {
-		after = time.After(timeout)
-	} else {
-		ch := make(chan time.Time)
-		defer close(ch)
-		after = ch
-	}
 	var lastEvent *watch.Event
 	for _, condition := range conditions {
 		// check the next condition against the previous event and short circuit waiting for the next watch
@@ -86,7 +85,7 @@ func UntilWithoutRetry(timeout time.Duration, watcher watch.Interface, condition
 					break ConditionSucceeded
 				}
 
-			case <-after:
+			case <-ctx.Done():
 				return lastEvent, wait.ErrWaitTimeout
 			}
 		}
@@ -101,8 +100,8 @@ func UntilWithoutRetry(timeout time.Duration, watcher watch.Interface, condition
 // It guarantees you to see all events and in the order they happened.
 // Due to this guarantee there is no way it can deal with 'Resource version too old error'. It will fail in this case.
 // The most frequent usage would be a test where you want to verify exact order of events.
-func Until(timeout time.Duration, initialResourceVersion string, watcherFunc WatcherFunc, conditions ...ConditionFunc) (*watch.Event, error) {
-	return UntilWithoutRetry(timeout, NewRetryWatcher(initialResourceVersion, watcherFunc), conditions...)
+func Until(ctx context.Context, initialResourceVersion string, watcherFunc WatcherFunc, conditions ...ConditionFunc) (*watch.Event, error) {
+	return UntilWithoutRetry(ctx, NewRetryWatcher(initialResourceVersion, watcherFunc), conditions...)
 }
 
 // UntilWithInformer creates an informer from lw and watches its output until each provided condition succeeds,
@@ -111,6 +110,41 @@ func Until(timeout time.Duration, initialResourceVersion string, watcherFunc Wat
 // On the other hand it can't provide you with guarantees as strong as Until. It can miss some events
 // in case of watch function failing but it will re-list to recover.
 // The most frequent usage would be a command that needs to watch the "state of the world" and should't fail. ("small" controllers)
-func UntilWithInformer(timeout time.Duration, lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration, conditions ...ConditionFunc) (*watch.Event, error) {
-	return UntilWithoutRetry(timeout, NewInformerWatcher(lw, objType, resyncPeriod), conditions...)
+func UntilWithInformer(ctx context.Context, lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration, precondition PreconditionFunc, conditions ...ConditionFunc) (*watch.Event, error) {
+	indexer, informer, watcher := NewIndexerInformerWatcher(lw, objType, resyncPeriod)
+	// Proxy watcher can be stopped multiple times so it's fine to use defer here to cover alternative branches and
+	// let UntilWithoutRetry to stop it
+	defer watcher.Stop()
+
+	if precondition != nil {
+		if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+			return nil, fmt.Errorf("UntilWithInformer: unable to sync caches: %v", ctx.Err())
+		}
+
+		done, err := precondition(indexer)
+		if err != nil {
+			return nil, err
+		}
+
+		if done {
+			return nil, nil
+		}
+	}
+
+	return UntilWithoutRetry(ctx, watcher, conditions...)
+}
+
+// ContextWithOptionalTimeout wraps context.WithTimeout and handles infinite timeouts expressed as 0 duration.
+func ContextWithOptionalTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout < 0 {
+		// This should be handled in validation
+		glog.Errorf("Timeout for context shall not be negative!")
+		timeout = 0
+	}
+
+	if timeout == 0 {
+		return context.WithCancel(parent)
+	}
+
+	return context.WithTimeout(parent, timeout)
 }

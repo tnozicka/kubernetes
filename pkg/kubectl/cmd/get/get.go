@@ -17,6 +17,7 @@ limitations under the License.
 package get
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -169,6 +170,8 @@ func NewCmdGet(parent string, f cmdutil.Factory, streams genericclioptions.IOStr
 
 	cmd.Flags().StringVar(&o.Raw, "raw", o.Raw, "Raw URI to request from the server.  Uses the transport specified by the kubeconfig file.")
 	cmd.Flags().BoolVarP(&o.Watch, "watch", "w", o.Watch, "After listing/getting the requested object, watch for changes. Uninitialized objects are excluded if no object name is provided.")
+	// TODO: deprecate and remove this flag. watch is not api WATCH but about watching state, the means are implementation detail
+	// TODO: This has no effect anymore as watching is informer based, not using only WATCH API method
 	cmd.Flags().BoolVar(&o.WatchOnly, "watch-only", o.WatchOnly, "Watch for changes to the requested object(s), without listing/getting first.")
 	cmd.Flags().Int64Var(&o.ChunkSize, "chunk-size", o.ChunkSize, "Return large lists in chunks rather than all at once. Pass 0 to disable. This flag is beta and may change in the future.")
 	cmd.Flags().BoolVar(&o.IgnoreNotFound, "ignore-not-found", o.IgnoreNotFound, "If the requested object does not exist the command will return exit code 0.")
@@ -577,7 +580,9 @@ func (o *GetOptions) watch(f cmdutil.Factory, cmd *cobra.Command, args []string)
 		// enforce using pure WATCH even in its description. Those need to be deprecated first.
 		// Also unit test for this function rely on the fact that it will fail when the API WATCH
 		// is closed which is what should be fixed. (Setting a short timeout could do it.)
-		_, err := watchtools.UntilWithoutRetry(o.Timeout, w, func(e watch.Event) (bool, error) {
+		ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), o.Timeout)
+		defer cancel()
+		_, err := watchtools.UntilWithoutRetry(ctx, w, func(e watch.Event) (bool, error) {
 			if !isList && first {
 				// drop the initial watch event in the single resource case
 				first = false

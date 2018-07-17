@@ -17,6 +17,7 @@ limitations under the License.
 package apimachinery
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -195,7 +196,8 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 						return getWatchFunc(c, secret)(options)
 					},
 				}
-				return watchtools.NewInformerWatcher(lw, &v1.Secret{}, 15*time.Second), nil
+				_, _, w := watchtools.NewIndexerInformerWatcher(lw, &v1.Secret{}, 15*time.Second)
+				return w, nil
 			},
 			normalizeOutputFunc: normalizeInformerOutputFunc(initialCount),
 		},
@@ -227,7 +229,9 @@ func TestWatchRestartsIfTimeoutNotReached(t *testing.T) {
 
 			// Record current time to be able to asses if the timeout has been reached
 			startTime := time.Now()
-			_, err = watchtools.UntilWithoutRetry(timeout, watcher, func(event watch.Event) (bool, error) {
+			ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), timeout)
+			defer cancel()
+			_, err = watchtools.UntilWithoutRetry(ctx, watcher, func(event watch.Event) (bool, error) {
 				s, ok := event.Object.(*v1.Secret)
 				if !ok {
 					t.Fatalf("Received an object that is not a Secret: %#v", event.Object)

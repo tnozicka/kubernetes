@@ -17,6 +17,7 @@ limitations under the License.
 package quota
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -168,7 +169,9 @@ func waitForQuota(t *testing.T, quota *v1.ResourceQuota, clientset *clientset.Cl
 		}
 		return w, err
 	}
-	_, err = watchtools.Until(1*time.Minute, rq.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	_, err = watchtools.Until(ctx, rq.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Modified:
 		default:
@@ -231,7 +234,9 @@ func scale(t *testing.T, namespace string, clientset *clientset.Clientset) {
 		}
 		return w, err
 	}
-	_, err = watchtools.Until(3*time.Minute, rc.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	_, err = watchtools.Until(ctx, rc.ResourceVersion, watchFunc, func(event watch.Event) (bool, error) {
 		switch event.Type {
 		case watch.Modified:
 		default:

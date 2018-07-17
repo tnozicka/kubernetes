@@ -17,6 +17,7 @@ limitations under the License.
 package watch
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -47,8 +48,8 @@ func TestUntil(t *testing.T) {
 		func(event watch.Event) (bool, error) { return event.Type == watch.Modified, nil },
 	}
 
-	timeout := time.Minute
-	lastEvent, err := UntilWithoutRetry(timeout, fw, conditions...)
+	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
+	lastEvent, err := UntilWithoutRetry(ctx, fw, conditions...)
 	if err != nil {
 		t.Fatalf("expected nil error, got %#v", err)
 	}
@@ -74,8 +75,8 @@ func TestUntilMultipleConditions(t *testing.T) {
 		func(event watch.Event) (bool, error) { return event.Type == watch.Added, nil },
 	}
 
-	timeout := time.Minute
-	lastEvent, err := UntilWithoutRetry(timeout, fw, conditions...)
+	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
+	lastEvent, err := UntilWithoutRetry(ctx, fw, conditions...)
 	if err != nil {
 		t.Fatalf("expected nil error, got %#v", err)
 	}
@@ -102,8 +103,8 @@ func TestUntilMultipleConditionsFail(t *testing.T) {
 		func(event watch.Event) (bool, error) { return event.Type == watch.Deleted, nil },
 	}
 
-	timeout := 10 * time.Second
-	lastEvent, err := UntilWithoutRetry(timeout, fw, conditions...)
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	lastEvent, err := UntilWithoutRetry(ctx, fw, conditions...)
 	if err != wait.ErrWaitTimeout {
 		t.Fatalf("expected ErrWaitTimeout error, got %#v", err)
 	}
@@ -134,8 +135,7 @@ func TestUntilTimeout(t *testing.T) {
 		},
 	}
 
-	timeout := time.Duration(0)
-	lastEvent, err := UntilWithoutRetry(timeout, fw, conditions...)
+	lastEvent, err := UntilWithoutRetry(context.Background(), fw, conditions...)
 	if err != nil {
 		t.Fatalf("expected nil error, got %#v", err)
 	}
@@ -162,8 +162,8 @@ func TestUntilErrorCondition(t *testing.T) {
 		func(event watch.Event) (bool, error) { return false, errors.New(expected) },
 	}
 
-	timeout := time.Minute
-	_, err := UntilWithoutRetry(timeout, fw, conditions...)
+	ctx, _ := context.WithTimeout(context.Background(), time.Minute)
+	_, err := UntilWithoutRetry(ctx, fw, conditions...)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

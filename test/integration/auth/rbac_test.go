@@ -17,6 +17,7 @@ limitations under the License.
 package auth
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -589,7 +590,9 @@ func TestBootstrapping(t *testing.T) {
 		}
 		return w, err
 	}
-	_, err := watchtools.Until(30*time.Second, "", watchFunc, func(event watch.Event) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := watchtools.Until(ctx, "", watchFunc, func(event watch.Event) (bool, error) {
 		if event.Type != watch.Added {
 			return false, nil
 		}

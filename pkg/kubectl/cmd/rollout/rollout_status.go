@@ -17,14 +17,20 @@ limitations under the License.
 package rollout
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubernetes/pkg/kubectl"
@@ -162,12 +168,12 @@ func (o *RolloutStatusOptions) Run(f cmdutil.Factory) error {
 	info := infos[0]
 	mapping := info.ResourceMapping()
 
-	obj, err := r.Object()
+	clientConfig, err := f.ToRESTConfig()
 	if err != nil {
 		return err
 	}
 
-	restClient, err := f.ClientForMapping(mapping)
+	dynamicClient, err := dynamic.NewForConfig(clientConfig)
 	if err != nil {
 		return err
 	}
@@ -177,41 +183,67 @@ func (o *RolloutStatusOptions) Run(f cmdutil.Factory) error {
 		return err
 	}
 
-	// check if deployment's has finished the rollout
-	status, done, err := statusViewer.Status(info.Namespace, info.Name, o.Revision)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(o.Out, "%s", status)
-	if done {
-		return nil
-	}
-
-	shouldWatch := o.Watch
-	if !shouldWatch {
-		return nil
+	fieldSelector := fields.OneTermEqualSelector("metadata.name", info.Name).String()
+	lw := &cache.ListWatch{
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fieldSelector
+			return dynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).List(options)
+		},
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fieldSelector
+			return dynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(options)
+		},
 	}
 
-	lw := cache.NewListWatchFromClient(restClient, mapping.Resource.String(), info.Namespace, fields.OneTermEqualSelector("metadata.name", info.Name))
-	w := watchtools.NewInformerWatcher(lw, obj, 0)
-	defer w.Stop()
+	preconditionFunc := func(store cache.Store) (bool, error) {
+		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: info.Namespace, Name: info.Name})
+		if err != nil {
+			return true, err
+		}
+		if !exists {
+			// We need to make sure we see the object in the cache before we start waiting for events
+			// or we would be waiting for the timeout if such object didn't exist.
+			return true, apierrors.NewNotFound(mapping.Resource.GroupResource(), info.Name)
+		}
+
+		return false, nil
+	}
 
 	// if the rollout isn't done yet, keep watching deployment status
-	intr := interrupt.New(nil, w.Stop)
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), o.Timeout)
+	intr := interrupt.New(nil, cancel)
 	return intr.Run(func() error {
-		_, err = watchtools.UntilWithoutRetry(o.Timeout, w, func(e watch.Event) (bool, error) {
-			// print deployment's status
-			status, done, err := statusViewer.Status(info.Namespace, info.Name, o.Revision)
-			if err != nil {
-				return false, err
-			}
-			fmt.Fprintf(o.Out, "%s", status)
-			// Quit waiting if the rollout is done
-			if done {
-				return true, nil
-			}
+		_, err = watchtools.UntilWithInformer(ctx, lw, &unstructured.Unstructured{}, 0, preconditionFunc, func(e watch.Event) (bool, error) {
+			switch t := e.Type; t {
+			case watch.Added, watch.Modified:
+				status, done, err := statusViewer.Status(e.Object.(runtime.Unstructured), o.Revision)
+				if err != nil {
+					return false, err
+				}
+				fmt.Fprintf(o.Out, "%s", status)
+				// Quit waiting if the rollout is done
+				if done {
+					return true, nil
+				}
 
-			return false, nil
+				shouldWatch := o.Watch
+				if !shouldWatch {
+					return true, nil
+				}
+
+				return false, nil
+
+			case watch.Deleted:
+				// We need to abort to avoid cases of recreation and not to silently watch the wrong (new) object
+				return true, fmt.Errorf("object has been deleted")
+
+			case watch.Error:
+				return true, fmt.Errorf("watch failed: %v", e.Object)
+
+			default:
+				glog.Fatalf("unexpected event %#v", e)
+				panic("glog failed to exit")
+			}
 		})
 		return err
 	})

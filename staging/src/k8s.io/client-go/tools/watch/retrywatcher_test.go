@@ -17,6 +17,7 @@ limitations under the License.
 package watch
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"reflect"
@@ -25,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -84,10 +86,12 @@ func fromRV(resourceVersion string, array []watch.Event) []watch.Event {
 	rv := AtoiOrDie(resourceVersion)
 
 	for _, event := range array {
-		rvGetter, ok := event.Object.(resourceVersionGetter)
-		if ok {
-			if AtoiOrDie(rvGetter.GetResourceVersion()) <= rv {
-				continue
+		if event.Type != watch.Error {
+			rvGetter, ok := event.Object.(resourceVersionGetter)
+			if ok {
+				if AtoiOrDie(rvGetter.GetResourceVersion()) <= rv {
+					continue
+				}
 			}
 		}
 
@@ -120,7 +124,7 @@ func TestRetryWatcher(t *testing.T) {
 		watcherFunc WatcherFunc
 		watchCount  uint32
 		result      []watch.Event
-		err         error
+		err         runtime.Object
 	}{
 		{
 			name: "fails if watcher returns error",
@@ -129,7 +133,7 @@ func TestRetryWatcher(t *testing.T) {
 			},
 			watchCount: 1,
 			result:     []watch.Event{},
-			err:        RetryWatcherError{"RetryWatcher: watcherFunc failed: test error"},
+			err:        apierrors.NewInternalError(errors.New("RetryWatcher: watcherFunc failed: test error")).Status(),
 		},
 		{
 			name:      "works with empty initialRV",
@@ -178,14 +182,14 @@ func TestRetryWatcher(t *testing.T) {
 			watcherFunc: func(sinceResourceVersion string) (watch.Interface, error) {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
 					makeTestEvent(4),
-					{Type: watch.Error, Object: RetryWatcherError{"error"}},
+					{Type: watch.Error, Object: apierrors.NewInternalError(errors.New("error")).Status()},
 				}))), nil
 			},
 			watchCount: 1,
 			result: []watch.Event{
 				makeTestEvent(4),
 			},
-			err: RetryWatcherError{"error"},
+			err: apierrors.NewInternalError(errors.New("error")).Status(),
 		},
 		{
 			name:      "fails on RetryWatcherError, without reading following events",
@@ -194,7 +198,7 @@ func TestRetryWatcher(t *testing.T) {
 				return watch.NewProxyWatcher(arrayToChannel(fromRV(sinceResourceVersion, []watch.Event{
 					makeTestEvent(5),
 					makeTestEvent(6),
-					{Type: watch.Error, Object: RetryWatcherError{"error"}},
+					{Type: watch.Error, Object: apierrors.NewInternalError(errors.New("error")).Status()},
 					makeTestEvent(7),
 					makeTestEvent(8),
 				}))), nil
@@ -203,7 +207,7 @@ func TestRetryWatcher(t *testing.T) {
 			result: []watch.Event{
 				makeTestEvent(6),
 			},
-			err: RetryWatcherError{"error"},
+			err: apierrors.NewInternalError(errors.New("error")).Status(),
 		},
 		{
 			name:      "survives 1 closed watch and reads 1 item",
@@ -371,20 +375,8 @@ func TestRetryWatcher(t *testing.T) {
 			}
 
 			if event.Type == watch.Error {
-				if tc.err == nil {
-					t.Errorf("unexpected error: %#v", event.Object)
-					return
-				}
-
-				err, ok := event.Object.(error)
-				if !ok {
-					t.Errorf("unexpected error type: %#v", event.Object)
-					return
-				}
-
-				if err != tc.err {
-					t.Errorf("expected error '%v', got '%v'", tc.err, err)
-					return
+				if !reflect.DeepEqual(event.Object, tc.err) {
+					t.Fatalf("expected error %#v, got %#v", tc.err, event.Object)
 				}
 
 				if len(result) >= 1 {

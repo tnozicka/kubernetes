@@ -17,36 +17,17 @@ limitations under the License.
 package watch
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/golang/glog"
 
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
 // WatcherFunc is a function that is responsible for creating a watcher starting at sinceResourceVersion.
 type WatcherFunc func(sinceResourceVersion string) (watch.Interface, error)
-
-// RetryWatcherError is the type of an event that will be returned if RetryWatcher fails.
-type RetryWatcherError struct {
-	s string
-}
-
-// Error implements error interface.
-func (e RetryWatcherError) Error() string {
-	return e.s
-}
-
-// GetObjectKind implements runtime.Object interface.
-func (e RetryWatcherError) GetObjectKind() schema.ObjectKind { return schema.EmptyObjectKind }
-
-// DeepCopyObject implements runtime.Object interface.
-func (e RetryWatcherError) DeepCopyObject() runtime.Object { return e }
-
-var _ error = RetryWatcherError{}
-var _ runtime.Object = RetryWatcherError{}
 
 // resourceVersionGetter is an interface used to get resource version from events.
 // We can't reuse an interface from meta otherwise it would be a cyclic dependency and we need just this one method
@@ -81,13 +62,17 @@ func NewRetryWatcher(initialResourceVersion string, watcherFunc WatcherFunc) *Re
 	return rw
 }
 
+//func statusAsPointer(status metav1.Status) *metav1.Status {
+//
+//}
+
 // doReceive returns true when it is done, false otherwise
 func (rw *RetryWatcher) doReceive() bool {
 	watcher, err := rw.watcherFunc(rw.lastResourceVersion)
 	if err != nil {
 		rw.resultChan <- watch.Event{
 			Type:   watch.Error,
-			Object: RetryWatcherError{fmt.Sprintf("RetryWatcher: watcherFunc failed: %v", err)},
+			Object: apierrors.NewInternalError(fmt.Errorf("RetryWatcher: watcherFunc failed: %v", err)).Status(),
 		}
 		// Stop the watcher
 		return true
@@ -113,7 +98,7 @@ func (rw *RetryWatcher) doReceive() bool {
 				if !ok {
 					rw.resultChan <- watch.Event{
 						Type:   watch.Error,
-						Object: RetryWatcherError{"__internal__: RetryWatcher: doesn't support resourceVersion"},
+						Object: apierrors.NewInternalError(errors.New("__internal__: RetryWatcher: doesn't support resourceVersion")).Status(),
 					}
 					// We have to abort here because this might cause lastResourceVersion inconsistency by skipping a potential RV with valid data!
 					return true
@@ -123,7 +108,7 @@ func (rw *RetryWatcher) doReceive() bool {
 				if resourceVersion == "" {
 					rw.resultChan <- watch.Event{
 						Type:   watch.Error,
-						Object: RetryWatcherError{fmt.Sprintf("__internal__: RetryWatcher: object %#v doesn't support resourceVersion", event.Object)},
+						Object: apierrors.NewInternalError(fmt.Errorf("__internal__: RetryWatcher: object %#v doesn't support resourceVersion", event.Object)).Status(),
 					}
 					// We have to abort here because this might cause lastResourceVersion inconsistency by skipping a potential RV with valid data!
 					return true
@@ -143,7 +128,7 @@ func (rw *RetryWatcher) doReceive() bool {
 				glog.Errorf("RetryWatcher failed to recognize Event type %q", event.Type)
 				rw.resultChan <- watch.Event{
 					Type:   watch.Error,
-					Object: RetryWatcherError{fmt.Sprintf("__internal__: RetryWatcher failed to recognize Event type %q", event.Type)},
+					Object: apierrors.NewInternalError(fmt.Errorf("__internal__: RetryWatcher failed to recognize Event type %q", event.Type)).Status(),
 				}
 				// We have to abort here because this might cause lastResourceVersion inconsistency by skipping a potential RV with valid data!
 				return true

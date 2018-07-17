@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"k8s.io/apimachinery/pkg/util/diff"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -148,7 +149,7 @@ func TestNewInformerWatcher(t *testing.T) {
 					return fake.Core().Secrets("").Watch(options)
 				},
 			}
-			w := NewInformerWatcher(lw, &corev1.Secret{}, 0)
+			_, _, w := NewIndexerInformerWatcher(lw, &corev1.Secret{}, 0)
 
 			var result []watch.Event
 		loop:
@@ -175,7 +176,7 @@ func TestNewInformerWatcher(t *testing.T) {
 			sort.Sort(byEventTypeAndName(result))
 
 			if !reflect.DeepEqual(expected, result) {
-				t.Error(spew.Errorf("\nexpected: %#v,\ngot:      %#v", expected, result))
+				t.Error(spew.Errorf("\nexpected: %#v,\ngot:      %#v,\ndiff: %s", expected, result, diff.ObjectReflectDiff(expected, result)))
 				return
 			}
 

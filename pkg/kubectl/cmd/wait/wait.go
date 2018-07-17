@@ -17,6 +17,7 @@ limitations under the License.
 package wait
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -25,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/tools/cache"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,7 +39,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/printers"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
-	"k8s.io/kubernetes/pkg/kubectl/scheme"
 )
 
 var (
@@ -142,7 +141,7 @@ func (flags *WaitFlags) ToOptions(args []string) (*WaitOptions, error) {
 	if err != nil {
 		return nil, err
 	}
-	conditionFn, err := conditionFuncFor(flags.ForCondition)
+	conditionFn, err := conditionWaitFuncFor(flags.ForCondition)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +164,7 @@ func (flags *WaitFlags) ToOptions(args []string) (*WaitOptions, error) {
 	return o, nil
 }
 
-func conditionFuncFor(condition string) (ConditionFunc, error) {
+func conditionWaitFuncFor(condition string) (ConditionFunc, error) {
 	if strings.ToLower(condition) == "delete" {
 		return IsDeleted, nil
 	}
@@ -209,11 +208,11 @@ type ConditionFunc func(info *resource.Info, o *WaitOptions) (finalObject runtim
 
 // RunWait runs the waiting logic
 func (o *WaitOptions) RunWait() error {
+	// TODO: remove this unnecessary GET call, informers now take care about it all
 	return o.ResourceFinder.Do().Visit(func(info *resource.Info, err error) error {
 		if err != nil {
 			return err
 		}
-
 		finalObject, success, err := o.ConditionFn(info, o)
 		if success {
 			o.Printer.PrintObj(finalObject, o.Out)
@@ -227,53 +226,7 @@ func (o *WaitOptions) RunWait() error {
 }
 
 // IsDeleted is a condition func for waiting for something to be deleted
-func IsDeleted(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
-	gottenObj, err := o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Get(info.Name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return info.Object, true, nil
-		}
-
-		// TODO this could do something slightly fancier if we wish
-		return info.Object, false, err
-	}
-	resourceLocation := ResourceLocation{
-		GroupResource: info.Mapping.Resource.GroupResource(),
-		Namespace:     gottenObj.GetNamespace(),
-		Name:          gottenObj.GetName(),
-	}
-	if uid, ok := o.UIDMap[resourceLocation]; ok {
-		if gottenObj.GetUID() != uid {
-			return gottenObj, true, nil
-		}
-	}
-
-	watchFunc := func(sinceResourceVersion string) (watch.Interface, error) {
-		return o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(metav1.ListOptions{
-			FieldSelector:   fields.OneTermEqualSelector("metadata.name", info.Name).String(),
-			ResourceVersion: sinceResourceVersion,
-		})
-	}
-	watchEvent, err := watchtools.Until(o.Timeout, gottenObj.GetResourceVersion(), watchFunc, isDeleted)
-	if err != nil {
-		return gottenObj, false, err
-	}
-
-	return watchEvent.Object, true, nil
-}
-
-func isDeleted(event watch.Event) (bool, error) {
-	return event.Type == watch.Deleted, nil
-}
-
-// ConditionalWait hold information to check an API status condition
-type ConditionalWait struct {
-	conditionName   string
-	conditionStatus string
-}
-
-// IsConditionMet is a conditionfunc for waiting on an API condition to be met
-func (w ConditionalWait) IsConditionMet(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
+func InformerWait(info *resource.Info, o *WaitOptions, precondition watchtools.PreconditionFunc, condition watchtools.ConditionFunc) (runtime.Object, bool, error) {
 	fieldSelector := fields.OneTermEqualSelector("metadata.name", info.Name).String()
 	lw := &cache.ListWatch{
 		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
@@ -285,17 +238,51 @@ func (w ConditionalWait) IsConditionMet(info *resource.Info, o *WaitOptions) (ru
 			return o.DynamicClient.Resource(info.Mapping.Resource).Namespace(info.Namespace).Watch(options)
 		},
 	}
-	emptyObj, err := scheme.Scheme.New(info.Mapping.GroupVersionKind)
+
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), o.Timeout)
+	defer cancel()
+	event, err := watchtools.UntilWithInformer(ctx, lw, &unstructured.Unstructured{}, 0, precondition, condition)
 	if err != nil {
 		return info.Object, false, err
 	}
 
-	event, err := watchtools.UntilWithInformer(o.Timeout, lw, emptyObj, 0, w.isConditionMet)
-	if err != nil {
-		return info.Object, false, err
+	if event == nil {
+		return nil, true, nil
 	}
 
 	return event.Object, true, nil
+}
+
+// IsDeleted is a condition func for waiting for something to be deleted
+func IsDeleted(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
+	preconditionFunc := func(store cache.Store) (bool, error) {
+		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: info.Namespace, Name: info.Name})
+		if err != nil {
+			return true, err
+		}
+		if !exists {
+			return true, nil
+		}
+
+		return false, nil
+	}
+
+	conditionFunc := func(event watch.Event) (bool, error) {
+		return event.Type == watch.Deleted, nil
+	}
+
+	return InformerWait(info, o, preconditionFunc, conditionFunc)
+}
+
+// ConditionalWait hold information to check an API status condition
+type ConditionalWait struct {
+	conditionName   string
+	conditionStatus string
+}
+
+// IsConditionMet is a conditionfunc for waiting on an API condition to be met
+func (w ConditionalWait) IsConditionMet(info *resource.Info, o *WaitOptions) (runtime.Object, bool, error) {
+	return InformerWait(info, o, nil, w.isConditionMet)
 }
 
 func (w ConditionalWait) checkCondition(obj *unstructured.Unstructured) (bool, error) {
@@ -324,8 +311,7 @@ func (w ConditionalWait) checkCondition(obj *unstructured.Unstructured) (bool, e
 
 func (w ConditionalWait) isConditionMet(event watch.Event) (bool, error) {
 	if event.Type == watch.Deleted {
-		// this will chain back out, result in another get and an return false back up the chain
-		return false, nil
+		return true, fmt.Errorf("object has been deleted before condition became true")
 	}
 	obj := event.Object.(*unstructured.Unstructured)
 	return w.checkCondition(obj)
