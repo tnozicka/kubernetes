@@ -157,8 +157,13 @@ func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *
 	if cc.CoreBroadcaster != nil && cc.CoreEventClient != nil {
 		cc.CoreBroadcaster.StartRecordingToSink(&corev1.EventSinkImpl{Interface: cc.CoreEventClient.Events("")})
 	}
+
 	// Setup healthz checks.
-	var checks []healthz.HealthChecker
+	checks := []healthz.HealthChecker{
+		healthz.LogHealthz,
+		healthz.NewServerPing(cc.Client),
+	}
+
 	if cc.ComponentConfig.LeaderElection.LeaderElect {
 		checks = append(checks, cc.LeaderElection.WatchDog)
 	}

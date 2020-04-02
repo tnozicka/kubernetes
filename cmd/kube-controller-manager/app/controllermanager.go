@@ -167,7 +167,10 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 	}
 
 	// Setup any healthz checks we will want to use.
-	var checks []healthz.HealthChecker
+	checks := []healthz.HealthChecker{
+		healthz.LogHealthz,
+		healthz.NewServerPing(c.Client),
+	}
 	var electionChecker *leaderelection.HealthzAdaptor
 	if c.ComponentConfig.Generic.LeaderElection.LeaderElect {
 		electionChecker = leaderelection.NewLeaderHealthzAdaptor(time.Second * 20)
