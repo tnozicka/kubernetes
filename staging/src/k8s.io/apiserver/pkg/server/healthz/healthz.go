@@ -18,6 +18,7 @@ package healthz
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -25,10 +26,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	authorizationv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/endpoints/metrics"
 	"k8s.io/apiserver/pkg/server/httplog"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog"
 )
 
@@ -79,6 +86,84 @@ func (l *log) Check(_ *http.Request) error {
 		return nil
 	}
 	return fmt.Errorf("logging blocked")
+}
+
+type serverPing struct {
+	kubeClient        kubernetes.Interface
+	checkTimeout      time.Duration
+	singleCallTimeout time.Duration
+}
+
+func NewServerPing(client kubernetes.Interface) *serverPing {
+	return NewServerPingWithOptions(client, 15*time.Second, 3*time.Second)
+}
+
+func NewServerPingWithOptions(client kubernetes.Interface, checkTimeout, singleCallTimeout time.Duration) *serverPing {
+	return &serverPing{
+		kubeClient:        client,
+		checkTimeout:      checkTimeout,
+		singleCallTimeout: singleCallTimeout,
+	}
+}
+
+func (s *serverPing) Name() string {
+	return "server ping"
+}
+
+func (s *serverPing) check(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	_, err := s.kubeClient.AuthorizationV1().SelfSubjectAccessReviews().Create(
+		ctx,
+		&authorizationv1.SelfSubjectAccessReview{
+			Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+				ResourceAttributes: &authorizationv1.ResourceAttributes{
+					Verb:     "list",
+					Group:    corev1.GroupName,
+					Version:  "v1",
+					Resource: "pods",
+				},
+			},
+		},
+		metav1.CreateOptions{},
+	)
+	if err != nil {
+		return true, err
+	}
+
+	return false, nil
+}
+
+func (s *serverPing) Check(r *http.Request) error {
+	// Test that server config works.
+	// We want to hit an endpoint to check Authentication and not Authorization
+	// so it is generic and not requiring any RBAC.
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), s.checkTimeout)
+	defer ctxCancel()
+
+	err := wait.ExponentialBackoffWithContext(ctx, retry.DefaultBackoff, func(ctx context.Context) (bool, error) {
+		done, err := s.check(ctx)
+		if err == nil {
+			return done, nil
+		}
+
+		switch t := err.(type) {
+		case errors.APIStatus:
+			if t.Status().Code >= 400 && t.Status().Code < 500 {
+				return true, err
+			}
+		}
+
+		// Ignore all other errors and try again
+		return done, err
+	})
+	if err != nil {
+		return fmt.Errorf("server ping failed: %w", err)
+	}
+
+	return nil
 }
 
 // NamedCheck returns a healthz checker for the given name and function.
