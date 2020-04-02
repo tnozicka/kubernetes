@@ -205,10 +205,20 @@ var ErrWaitTimeout = errors.New("timed out waiting for the condition")
 // if the loop should be aborted.
 type ConditionFunc func() (done bool, err error)
 
+// ConditionWithContextFunc returns true if the condition is satisfied, or an error
+// if the loop should be aborted.
+type ConditionWithContextFunc func(ctx context.Context) (done bool, err error)
+
 // runConditionWithCrashProtection runs a ConditionFunc with crash protection
 func runConditionWithCrashProtection(condition ConditionFunc) (bool, error) {
 	defer runtime.HandleCrash()
 	return condition()
+}
+
+// runConditionWithCrashProtection runs a ConditionFunc with crash protection
+func runConditionWithContextWithCrashProtection(ctx context.Context, condition ConditionWithContextFunc) (bool, error) {
+	defer runtime.HandleCrash()
+	return condition(ctx)
 }
 
 // Backoff holds parameters applied to a Backoff function.
@@ -382,14 +392,36 @@ func (j *jitteredBackoffManagerImpl) Backoff() clock.Timer {
 // In case (1) the returned error is what the condition function returned.
 // In all other cases, ErrWaitTimeout is returned.
 func ExponentialBackoff(backoff Backoff, condition ConditionFunc) error {
+	return ExponentialBackoffWithContext(context.Background(), backoff, func(ctx context.Context) (done bool, err error) {return condition()})
+}
+
+// ExponentialBackoffWithContext repeats a condition check with exponential backoff.
+//
+// It repeatedly checks the condition and then sleeps, using `backoff.Step()`
+// to determine the length of the sleep and adjust Duration and Steps.
+// Stops and returns as soon as:
+// 1. the condition check returns true or an error,
+// 2. `backoff.Steps` checks of the condition have been done, or
+// 3. a sleep truncated by the cap on duration has been completed.
+// In case (1) the returned error is what the condition function returned.
+// In all other cases, ErrWaitTimeout is returned.
+func ExponentialBackoffWithContext(ctx context.Context, backoff Backoff, condition ConditionWithContextFunc) error {
 	for backoff.Steps > 0 {
-		if ok, err := runConditionWithCrashProtection(condition); err != nil || ok {
+		if ok, err := runConditionWithContextWithCrashProtection(ctx, condition); err != nil || ok {
 			return err
 		}
 		if backoff.Steps == 1 {
 			break
 		}
-		time.Sleep(backoff.Step())
+
+		timer := time.NewTimer(backoff.Step())
+		select {
+		case <-timer.C:
+			break
+		case <-ctx.Done():
+			timer.Stop()
+			return ErrWaitTimeout
+		}
 	}
 	return ErrWaitTimeout
 }
