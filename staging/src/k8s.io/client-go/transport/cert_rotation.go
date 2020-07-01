@@ -35,7 +35,7 @@ import (
 const workItemKey = "key"
 
 // CertCallbackRefreshDuration is exposed so that integration tests can crank up the reload speed.
-var CertCallbackRefreshDuration = 5 * time.Minute
+var CertCallbackRefreshDuration = 15 * time.Second
 
 type reloadFunc func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 
