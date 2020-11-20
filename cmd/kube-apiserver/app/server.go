@@ -388,7 +388,7 @@ func CreateKubeAPIServerConfig(
 	var eventStorage *eventstorage.REST
 	eventStorage, err = eventstorage.NewREST(genericConfig.RESTOptionsGetter, uint64(s.EventTTL.Seconds()))
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	genericConfig.EventSink = eventRegistrySink{eventStorage}
 
