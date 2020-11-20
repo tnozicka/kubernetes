@@ -164,6 +164,7 @@ var (
 			`Liveness liveness pods should be automatically restarted`,
 			`Secret should create a pod that reads a secret`,
 			`Pods should delete a collection of pods`,
+			`Pods should run through the lifecycle of Pods and PodStatus`,
 		},
 		"[sig-cluster-lifecycle]": {
 			`Feature:ClusterAutoscalerScalability`,
