@@ -222,25 +222,26 @@ type ConfigFile struct {
 
 // CloudConfig includes all the necessary configuration for creating Cloud
 type CloudConfig struct {
-	APIEndpoint                  string
-	ContainerAPIEndpoint         string
-	ProjectID                    string
-	NetworkProjectID             string
-	Region                       string
-	Regional                     bool
-	Zone                         string
-	ManagedZones                 []string
-	NetworkName                  string
-	NetworkURL                   string
-	SubnetworkName               string
-	SubnetworkURL                string
+	APIEndpoint          string
+	ContainerAPIEndpoint string
+	ProjectID            string
+	NetworkProjectID     string
+	Region               string
+	Regional             bool
+	Zone                 string
+	ManagedZones         []string
+	NetworkName          string
+	NetworkURL           string
+	SubnetworkName       string
+	SubnetworkURL        string
 	// DEPRECATED: Do not rely on this value as it may be incorrect.
-	SecondaryRangeName string
-	NodeTags           []string
-	NodeInstancePrefix string
-	ExternalInstanceGroupsPrefix stringTokenSource        oauth2.TokenSource
-	UseMetadataServer  bool
-	AlphaFeatureGate   *AlphaFeatureGate
+	SecondaryRangeName           string
+	NodeTags                     []string
+	NodeInstancePrefix           string
+	ExternalInstanceGroupsPrefix string
+	TokenSource                  oauth2.TokenSource
+	UseMetadataServer            bool
+	AlphaFeatureGate             *AlphaFeatureGate
 }
 
 func init() {
